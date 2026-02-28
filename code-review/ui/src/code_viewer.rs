@@ -1,9 +1,11 @@
-use egui::{Align, Layout, RichText, ScrollArea, Ui};
+use egui::{Align, Color32, FontId, Layout, RichText, ScrollArea, TextFormat, Ui};
+use egui::text::LayoutJob;
 
+use crate::state::HighlightedLines;
 use crate::theme;
 
-/// Render a code file with line numbers in a scrollable area.
-pub fn render(ui: &mut Ui, content: &str, path: &str) {
+/// Render a syntax-highlighted code file with line numbers.
+pub fn render(ui: &mut Ui, lines: &HighlightedLines, path: &str) {
     ui.vertical(|ui| {
         // File path header
         ui.horizontal(|ui| {
@@ -21,10 +23,11 @@ pub fn render(ui: &mut Ui, content: &str, path: &str) {
         ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let lines: Vec<&str> = content.lines().collect();
-                let gutter_width = format!("{}", lines.len()).len() as f32 * 8.0 + 16.0;
+                let line_count = lines.len();
+                let gutter_width = format!("{line_count}").len() as f32 * 8.0 + 16.0;
+                let code_font = FontId::monospace(13.0);
 
-                for (i, line) in lines.iter().enumerate() {
+                for (i, spans) in lines.iter().enumerate() {
                     let line_num = i + 1;
                     ui.horizontal(|ui| {
                         // Line number gutter
@@ -38,20 +41,39 @@ pub fn render(ui: &mut Ui, content: &str, path: &str) {
                             gutter_rect.1.right_center() - egui::vec2(8.0, 0.0),
                             egui::Align2::RIGHT_CENTER,
                             format!("{line_num}"),
-                            egui::FontId::monospace(12.0),
+                            FontId::monospace(12.0),
                             theme::text_muted(),
                         );
 
                         ui.add_space(8.0);
 
-                        // Code line
+                        // Highlighted code line via LayoutJob
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(*line)
-                                    .monospace()
-                                    .color(theme::text_primary())
-                                    .size(13.0),
-                            );
+                            let mut job = LayoutJob::default();
+                            for span in spans {
+                                job.append(
+                                    &span.text,
+                                    0.0,
+                                    TextFormat {
+                                        font_id: code_font.clone(),
+                                        color: Color32::from_rgb(span.r, span.g, span.b),
+                                        ..Default::default()
+                                    },
+                                );
+                            }
+                            // Empty line fallback — ensure the row still occupies space
+                            if spans.is_empty() {
+                                job.append(
+                                    " ",
+                                    0.0,
+                                    TextFormat {
+                                        font_id: code_font.clone(),
+                                        color: Color32::TRANSPARENT,
+                                        ..Default::default()
+                                    },
+                                );
+                            }
+                            ui.label(job);
                         });
                     });
                 }

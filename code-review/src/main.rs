@@ -1,4 +1,5 @@
 mod files;
+mod highlighting;
 mod server;
 
 use std::path::PathBuf;
@@ -26,9 +27,12 @@ async fn main() {
     let file_paths = files::discover_python_files(&root);
     info!("Found {} Python files", file_paths.len());
 
+    let highlighter = highlighting::Highlighter::new();
+
     let state = server::AppState {
         root,
         file_paths: Arc::new(file_paths),
+        highlighter: Arc::new(highlighter),
     };
 
     let app = server::router(state);

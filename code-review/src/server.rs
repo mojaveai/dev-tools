@@ -9,6 +9,7 @@ use axum::Router;
 use serde::Deserialize;
 
 use crate::files;
+use crate::highlighting::{Highlighter, StyledSpan};
 
 // Embed build artifacts at compile time
 const INDEX_HTML: &[u8] = include_bytes!("../assets/index.html");
@@ -20,6 +21,7 @@ const WASM_BG: &[u8] = include_bytes!(env!("WASM_BG_PATH"));
 pub struct AppState {
     pub root: PathBuf,
     pub file_paths: Arc<Vec<String>>,
+    pub highlighter: Arc<Highlighter>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -75,6 +77,7 @@ struct FileQuery {
 struct FileResponse {
     path: String,
     content: String,
+    highlights: Vec<Vec<StyledSpan>>,
 }
 
 async fn api_file(
@@ -88,8 +91,19 @@ async fn api_file(
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, format!("Cannot read file: {e}")))?;
 
+    let highlighter = Arc::clone(&state.highlighter);
+    let path_for_hl = query.path.clone();
+    let content_for_hl = content.clone();
+
+    let highlights = tokio::task::spawn_blocking(move || {
+        highlighter.highlight(&content_for_hl, &path_for_hl)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Highlight failed: {e}")))?;
+
     Ok(axum::Json(FileResponse {
         path: query.path,
         content,
+        highlights,
     }))
 }

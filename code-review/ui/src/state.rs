@@ -85,6 +85,18 @@ fn insert_path(nodes: &mut Vec<FileNode>, full_path: &str, parts: &[&str]) {
     }
 }
 
+/// A single styled text fragment from server-side syntax highlighting.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StyledSpan {
+    pub text: String,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+/// All highlighted lines for a file.
+pub type HighlightedLines = Vec<Vec<StyledSpan>>;
+
 /// Sort tree: directories first (alphabetical), then files (alphabetical).
 fn sort_tree(nodes: &mut [FileNode]) {
     nodes.sort_by(|a, b| {

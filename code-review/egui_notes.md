@@ -33,6 +33,14 @@ Key reference notes for developing with egui 0.33 / eframe 0.33.
 - `CollapsingHeader` for tree nodes, `selectable_label` for leaf items
 - `centered_and_justified` for centered empty-state messages
 
+## Rich Text with LayoutJob
+
+- `LayoutJob` allows rendering a single label with multiple styled spans (font, color per segment)
+- Use `job.append(text, leading_space, TextFormat { font_id, color, .. })` to add spans
+- Much more efficient than multiple `RichText` labels for syntax-highlighted code
+- For empty lines, append a transparent space to maintain row height
+- `TextFormat` fields: `font_id`, `color`, `background`, `italics`, `underline`, `strikethrough`, `valign`
+
 ## Performance
 
 - Theme application: do once with a bool flag, not every frame

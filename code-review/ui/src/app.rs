@@ -3,7 +3,7 @@ use std::sync::Arc;
 use eframe::Frame;
 use egui::{CentralPanel, SidePanel, TopBottomPanel, RichText};
 
-use crate::state::{AsyncData, FileNode, SharedAsync, shared_loading};
+use crate::state::{AsyncData, FileNode, HighlightedLines, SharedAsync, shared_loading};
 use crate::{code_viewer, file_browser, theme};
 
 /// Response shape for GET /api/file
@@ -11,14 +11,16 @@ use crate::{code_viewer, file_browser, theme};
 struct FileResponse {
     #[allow(dead_code)]
     path: String,
+    #[allow(dead_code)]
     content: String,
+    highlights: HighlightedLines,
 }
 
 pub struct CodeReviewApp {
     file_list: SharedAsync<Vec<String>>,
     file_tree: Vec<FileNode>,
     selected_path: Option<String>,
-    file_content: Option<SharedAsync<String>>,
+    file_content: Option<SharedAsync<HighlightedLines>>,
     theme_applied: bool,
 }
 
@@ -53,7 +55,7 @@ impl CodeReviewApp {
     }
 
     fn fetch_file_content(&mut self, path: &str, ctx: &egui::Context) {
-        let shared: SharedAsync<String> = shared_loading();
+        let shared: SharedAsync<HighlightedLines> = shared_loading();
         self.file_content = Some(Arc::clone(&shared));
 
         let url = format!("/api/file?path={}", js_encode_uri_component(path));
@@ -63,7 +65,7 @@ impl CodeReviewApp {
             let value = match result {
                 Ok(response) => {
                     serde_json::from_slice::<FileResponse>(&response.bytes)
-                        .map(|r| AsyncData::Loaded(r.content))
+                        .map(|r| AsyncData::Loaded(r.highlights))
                         .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
                 }
                 Err(err) => AsyncData::Error(err),
@@ -173,11 +175,11 @@ impl eframe::App for CodeReviewApp {
                         AsyncData::Error(err) => {
                             ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
                         }
-                        AsyncData::Loaded(content) => {
-                            let content = content.clone();
+                        AsyncData::Loaded(lines) => {
+                            let lines = lines.clone();
                             let path = path.clone();
                             drop(data);
-                            code_viewer::render(ui, &content, &path);
+                            code_viewer::render(ui, &lines, &path);
                         }
                     }
                 }
