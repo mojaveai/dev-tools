@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use eframe::Frame;
 use egui::{CentralPanel, SidePanel, TopBottomPanel, RichText};
+use egui::text::LayoutJob;
 
+use crate::perf::FrameStats;
 use crate::state::{AsyncData, FileNode, HighlightedLines, SharedAsync, shared_loading};
 use crate::{code_viewer, file_browser, theme};
 
@@ -16,12 +18,26 @@ struct FileResponse {
     highlights: HighlightedLines,
 }
 
+/// Resolved file content — no mutex needed during rendering.
+enum FileContent {
+    /// No file selected or fetch in progress.
+    Empty,
+    /// Pre-computed layout jobs, ready to render.
+    Ready(Vec<LayoutJob>),
+    /// Fetch or parse failed.
+    Error(String),
+}
+
 pub struct CodeReviewApp {
     file_list: SharedAsync<Vec<String>>,
     file_tree: Vec<FileNode>,
     selected_path: Option<String>,
-    file_content: Option<SharedAsync<HighlightedLines>>,
+    /// In-flight fetch handle — polled each frame until resolved.
+    pending_content: Option<SharedAsync<HighlightedLines>>,
+    /// Resolved content — lives here lock-free after the fetch completes.
+    content: FileContent,
     theme_applied: bool,
+    frame_stats: FrameStats,
 }
 
 impl CodeReviewApp {
@@ -30,8 +46,10 @@ impl CodeReviewApp {
             file_list: shared_loading(),
             file_tree: Vec::new(),
             selected_path: None,
-            file_content: None,
+            pending_content: None,
+            content: FileContent::Empty,
             theme_applied: false,
+            frame_stats: FrameStats::new(),
         }
     }
 
@@ -56,7 +74,8 @@ impl CodeReviewApp {
 
     fn fetch_file_content(&mut self, path: &str, ctx: &egui::Context) {
         let shared: SharedAsync<HighlightedLines> = shared_loading();
-        self.file_content = Some(Arc::clone(&shared));
+        self.pending_content = Some(Arc::clone(&shared));
+        self.content = FileContent::Empty;
 
         let url = format!("/api/file?path={}", js_encode_uri_component(path));
         let ctx = ctx.clone();
@@ -75,6 +94,29 @@ impl CodeReviewApp {
         });
     }
 
+    /// Move data out of the async handle once it arrives, converting spans
+    /// to `LayoutJob`s exactly once. After this, rendering is lock-free.
+    fn poll_pending_content(&mut self) {
+        let Some(pending) = self.pending_content.clone() else { return };
+        let mut guard = pending.lock().unwrap();
+
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(lines) => {
+                drop(guard);
+                self.content = FileContent::Ready(code_viewer::prepare(&lines));
+            }
+            AsyncData::Error(err) => {
+                self.content = FileContent::Error(err);
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_content = None;
+    }
+
     fn update_tree_if_needed(&mut self) {
         let data = self.file_list.lock().unwrap();
         if let AsyncData::Loaded(paths) = &*data
@@ -88,12 +130,15 @@ impl CodeReviewApp {
 
 impl eframe::App for CodeReviewApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        let t0 = self.frame_stats.begin();
+
         if !self.theme_applied {
             theme::apply(ctx);
             self.theme_applied = true;
         }
 
         self.update_tree_if_needed();
+        self.poll_pending_content();
 
         // Top bar
         TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -163,31 +208,25 @@ impl eframe::App for CodeReviewApp {
 
         // Central panel: code viewer
         CentralPanel::default().show(ctx, |ui| {
-            match (&self.selected_path, &self.file_content) {
-                (Some(path), Some(content_handle)) => {
-                    let data = content_handle.lock().unwrap();
-                    match &*data {
-                        AsyncData::Loading => {
-                            ui.centered_and_justified(|ui| {
-                                ui.spinner();
-                            });
-                        }
-                        AsyncData::Error(err) => {
-                            ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
-                        }
-                        AsyncData::Loaded(lines) => {
-                            let lines = lines.clone();
-                            let path = path.clone();
-                            drop(data);
-                            code_viewer::render(ui, &lines, &path);
-                        }
-                    }
+            match (&self.selected_path, &self.content) {
+                (Some(path), FileContent::Ready(jobs)) => {
+                    code_viewer::render(ui, jobs, path);
+                }
+                (Some(_), FileContent::Error(err)) => {
+                    ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+                }
+                (Some(_), FileContent::Empty) => {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                    });
                 }
                 _ => {
                     code_viewer::render_empty(ui);
                 }
             }
         });
+
+        self.frame_stats.end(t0);
     }
 }
 

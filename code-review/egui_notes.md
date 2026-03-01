@@ -41,6 +41,16 @@ Key reference notes for developing with egui 0.33 / eframe 0.33.
 - For empty lines, append a transparent space to maintain row height
 - `TextFormat` fields: `font_id`, `color`, `background`, `italics`, `underline`, `strikethrough`, `valign`
 
+## Scroll Performance (Critical)
+
+- **Never** use `ScrollArea::show()` with large content — it lays out ALL rows every frame
+- Use `ScrollArea::show_rows(ui, row_height, total_rows, |ui, range| { ... })` for virtualized scrolling
+  - Only visible rows are laid out → constant per-frame cost regardless of content size
+  - `row_height` is height sans spacing; egui adds `item_spacing.y` between rows automatically
+  - Works with `ScrollArea::both()` for horizontal + virtual-vertical scrolling
+- For manual control, `show_viewport(ui, |ui, viewport| { ... })` gives raw viewport rect to compute visible range yourself
+- Row height must be consistent across all rows for accurate scroll positioning
+
 ## Performance
 
 - Theme application: do once with a bool flag, not every frame

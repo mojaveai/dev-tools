@@ -9,12 +9,9 @@ const TEXT_MUTED: Color32 = Color32::from_rgb(0x6B, 0x6B, 0x7B);
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0x64, 0xB4);
 const ACCENT_LIGHT: Color32 = Color32::from_rgb(0xE3, 0xF0, 0xFA);
 const BORDER: Color32 = Color32::from_rgb(0xE0, 0xE0, 0xDB);
-const GUTTER_BG: Color32 = Color32::from_rgb(0xF0, 0xF0, 0xEC);
-
 pub const fn text_primary() -> Color32 { TEXT_PRIMARY }
 pub const fn text_muted() -> Color32 { TEXT_MUTED }
 pub const fn accent() -> Color32 { ACCENT }
-pub const fn gutter_bg() -> Color32 { GUTTER_BG }
 
 /// Apply the distill.pub-inspired theme to an egui context.
 pub fn apply(ctx: &egui::Context) {

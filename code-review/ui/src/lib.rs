@@ -1,6 +1,7 @@
 mod app;
 mod code_viewer;
 mod file_browser;
+mod perf;
 mod state;
 mod theme;
 
