@@ -1,5 +1,4 @@
 mod app;
-mod call_graph;
 mod code_viewer;
 mod file_browser;
 mod perf;

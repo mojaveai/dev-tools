@@ -9,7 +9,6 @@ use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
 
-use crate::call_graph::{self, CallEdge};
 use crate::files;
 use crate::functions::{self, FunctionInfo};
 use crate::highlighting::{Highlighter, StyledSpan};
@@ -91,7 +90,6 @@ struct FileResponse {
     content: String,
     highlights: Vec<Vec<StyledSpan>>,
     functions: Vec<FunctionInfo>,
-    call_edges: Vec<CallEdge>,
 }
 
 async fn api_file(
@@ -109,17 +107,15 @@ async fn api_file(
     let path_for_hl = query.path.clone();
     let content_for_hl = content.clone();
 
-    let content_for_parse = content.clone();
+    let content_for_fn = content.clone();
     let highlights = tokio::task::spawn_blocking(move || {
         highlighter.highlight(&content_for_hl, &path_for_hl)
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Highlight failed: {e}")))?;
 
-    let (functions, call_edges) = tokio::task::spawn_blocking(move || {
-        let functions = functions::extract_python_functions(&content_for_parse);
-        let call_edges = call_graph::extract_call_edges(&content_for_parse, &functions);
-        (functions, call_edges)
+    let functions = tokio::task::spawn_blocking(move || {
+        functions::extract_python_functions(&content_for_fn)
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Function parse failed: {e}")))?;
@@ -129,6 +125,5 @@ async fn api_file(
         content,
         highlights,
         functions,
-        call_edges,
     }))
 }
