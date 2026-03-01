@@ -95,6 +95,23 @@ pub struct StyledSpan {
 /// All highlighted lines for a file.
 pub type HighlightedLines = Vec<Vec<StyledSpan>>;
 
+/// Metadata about a function definition within a file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FunctionInfo {
+    pub name: String,
+    /// First line (0-indexed), including decorators.
+    pub start_line: usize,
+    /// One past the last line (0-indexed, exclusive).
+    pub end_line: usize,
+}
+
+/// All data returned by the `/api/file` endpoint needed by the UI.
+#[derive(Debug, Clone)]
+pub struct FilePayload {
+    pub highlights: HighlightedLines,
+    pub functions: Vec<FunctionInfo>,
+}
+
 /// Collect all file paths from the tree in display order (depth-first, dirs first).
 pub fn collect_paths(nodes: &[FileNode]) -> Vec<String> {
     let mut out = Vec::new();

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use eframe::Frame;
-use egui::{CentralPanel, Key, SidePanel, TopBottomPanel, RichText};
 use egui::text::LayoutJob;
+use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 
 use crate::perf::FrameStats;
 use crate::state::{
-    AsyncData, FileNode, FilesResponse, HighlightedLines, SharedAsync, collect_paths,
-    shared_loading,
+    AsyncData, FileNode, FilePayload, FilesResponse, FunctionInfo, HighlightedLines, SharedAsync,
+    collect_paths, shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -19,6 +19,7 @@ struct FileResponse {
     #[allow(dead_code)]
     content: String,
     highlights: HighlightedLines,
+    functions: Vec<FunctionInfo>,
 }
 
 /// Resolved file content — no mutex needed during rendering.
@@ -26,7 +27,13 @@ enum FileContent {
     /// No file selected or fetch in progress.
     Empty,
     /// Pre-computed layout jobs, ready to render.
-    Ready(Vec<LayoutJob>),
+    Ready {
+        jobs: Vec<LayoutJob>,
+        /// Original spans retained for re-preparing when focus changes.
+        spans: HighlightedLines,
+        /// Function definitions in this file.
+        functions: Vec<FunctionInfo>,
+    },
     /// Fetch or parse failed.
     Error(String),
 }
@@ -39,7 +46,7 @@ pub struct CodeReviewApp {
     flat_paths: Vec<String>,
     selected_path: Option<String>,
     /// In-flight fetch handle — polled each frame until resolved.
-    pending_content: Option<SharedAsync<HighlightedLines>>,
+    pending_content: Option<SharedAsync<FilePayload>>,
     /// Resolved content — lives here lock-free after the fetch completes.
     content: FileContent,
     theme_applied: bool,
@@ -51,8 +58,14 @@ pub struct CodeReviewApp {
     scan_complete: bool,
     /// egui time at which to fire the next file-list poll.
     poll_files_after: Option<f64>,
-    /// Bumped on every file change so the scroll area resets to top.
+    /// Bumped on every file/function change so the scroll area resets.
     scroll_generation: u64,
+    /// Last `scroll_generation` for which we applied the scroll offset.
+    last_applied_scroll: u64,
+    /// Desired vertical scroll offset for the next scroll reset.
+    scroll_offset_y: f32,
+    /// Index of the currently focused function within the file.
+    focused_function: usize,
 }
 
 impl CodeReviewApp {
@@ -71,6 +84,9 @@ impl CodeReviewApp {
             scan_complete: false,
             poll_files_after: None,
             scroll_generation: 0,
+            last_applied_scroll: 0,
+            scroll_offset_y: 0.0,
+            focused_function: 0,
         }
     }
 
@@ -82,11 +98,9 @@ impl CodeReviewApp {
 
         ehttp::fetch(ehttp::Request::get("/api/files"), move |result| {
             let value = match result {
-                Ok(response) => {
-                    serde_json::from_slice::<FilesResponse>(&response.bytes)
-                        .map(AsyncData::Loaded)
-                        .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
-                }
+                Ok(response) => serde_json::from_slice::<FilesResponse>(&response.bytes)
+                    .map(AsyncData::Loaded)
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
                 Err(err) => AsyncData::Error(err),
             };
             *shared.lock().unwrap() = value;
@@ -95,7 +109,7 @@ impl CodeReviewApp {
     }
 
     fn fetch_file_content(&mut self, path: &str, ctx: &egui::Context) {
-        let shared: SharedAsync<HighlightedLines> = shared_loading();
+        let shared: SharedAsync<FilePayload> = shared_loading();
         self.pending_content = Some(Arc::clone(&shared));
         self.content = FileContent::Empty;
 
@@ -104,11 +118,14 @@ impl CodeReviewApp {
 
         ehttp::fetch(ehttp::Request::get(&url), move |result| {
             let value = match result {
-                Ok(response) => {
-                    serde_json::from_slice::<FileResponse>(&response.bytes)
-                        .map(|r| AsyncData::Loaded(r.highlights))
-                        .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
-                }
+                Ok(response) => serde_json::from_slice::<FileResponse>(&response.bytes)
+                    .map(|r| {
+                        AsyncData::Loaded(FilePayload {
+                            highlights: r.highlights,
+                            functions: r.functions,
+                        })
+                    })
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
                 Err(err) => AsyncData::Error(err),
             };
             *shared.lock().unwrap() = value;
@@ -119,7 +136,9 @@ impl CodeReviewApp {
     /// Move data out of the async handle once it arrives, converting spans
     /// to `LayoutJob`s exactly once. After this, rendering is lock-free.
     fn poll_pending_content(&mut self) {
-        let Some(pending) = self.pending_content.clone() else { return };
+        let Some(pending) = self.pending_content.clone() else {
+            return;
+        };
         let mut guard = pending.lock().unwrap();
 
         if matches!(*guard, AsyncData::Loading) {
@@ -127,9 +146,17 @@ impl CodeReviewApp {
         }
 
         match std::mem::replace(&mut *guard, AsyncData::Loading) {
-            AsyncData::Loaded(lines) => {
+            AsyncData::Loaded(payload) => {
                 drop(guard);
-                self.content = FileContent::Ready(code_viewer::prepare(&lines));
+                self.focused_function = 0;
+                let focus = focus_range(&payload.functions, 0);
+                let jobs = code_viewer::prepare(&payload.highlights, focus);
+                self.content = FileContent::Ready {
+                    jobs,
+                    spans: payload.highlights,
+                    functions: payload.functions,
+                };
+                self.apply_function_scroll(0);
             }
             AsyncData::Error(err) => {
                 self.content = FileContent::Error(err);
@@ -176,7 +203,6 @@ impl CodeReviewApp {
             }
             AsyncData::Error(_err) => {
                 self.pending_file_list = None;
-                // Retry after a short delay even on error.
                 if !self.scan_complete {
                     self.schedule_file_poll(ctx);
                 }
@@ -202,12 +228,19 @@ impl CodeReviewApp {
     fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
         if let Some(path) = self.flat_paths.get(index).cloned() {
             self.selected_path = Some(path.clone());
+            self.focused_function = 0;
             self.scroll_generation += 1;
+            self.scroll_offset_y = 0.0;
             self.fetch_file_content(&path, ctx);
         }
     }
 
+    /// Advance to the next function, or the next file if at the last function.
     fn navigate_next(&mut self, ctx: &egui::Context) {
+        if self.try_focus_function(self.focused_function + 1) {
+            return;
+        }
+        // Move to next file
         let next = self
             .current_index()
             .map(|i| (i + 1).min(self.flat_paths.len().saturating_sub(1)))
@@ -215,13 +248,91 @@ impl CodeReviewApp {
         self.navigate_to(next, ctx);
     }
 
+    /// Go back to the previous function, or the previous file (last function) if at the first.
     fn navigate_prev(&mut self, ctx: &egui::Context) {
+        if self.focused_function > 0 && self.try_focus_function(self.focused_function - 1) {
+            return;
+        }
+        // Move to previous file — focused_function will be set to last once content loads
         let prev = self
             .current_index()
             .map(|i| i.saturating_sub(1))
             .unwrap_or(0);
-        self.navigate_to(prev, ctx);
+        if self.current_index() == Some(prev) && self.focused_function == 0 {
+            return; // already at the very start
+        }
+        self.navigate_to_last_function(prev, ctx);
     }
+
+    /// Navigate to a file and focus its last function (for backward navigation).
+    fn navigate_to_last_function(&mut self, index: usize, ctx: &egui::Context) {
+        if let Some(path) = self.flat_paths.get(index).cloned() {
+            self.selected_path = Some(path.clone());
+            // Set a sentinel value — will be clamped in poll_pending_content
+            self.focused_function = usize::MAX;
+            self.scroll_generation += 1;
+            self.scroll_offset_y = 0.0;
+            self.fetch_file_content(&path, ctx);
+        }
+    }
+
+    /// Try to focus function at `index` within the current file's function list.
+    /// Returns `true` if successful, `false` if out of bounds.
+    fn try_focus_function(&mut self, index: usize) -> bool {
+        let FileContent::Ready {
+            jobs,
+            spans,
+            functions,
+        } = &mut self.content
+        else {
+            return false;
+        };
+
+        if functions.is_empty() || index >= functions.len() {
+            return false;
+        }
+
+        self.focused_function = index;
+        let focus = focus_range(functions, index);
+        *jobs = code_viewer::prepare(spans, focus);
+        self.apply_function_scroll(index);
+        true
+    }
+
+    /// Bump scroll generation and set offset to the start of the given function.
+    fn apply_function_scroll(&mut self, fn_index: usize) {
+        self.scroll_generation += 1;
+        self.scroll_offset_y = match &self.content {
+            FileContent::Ready { functions, .. } => functions
+                .get(fn_index)
+                .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+    }
+
+    /// The name of the currently focused function, if any.
+    fn focused_function_name(&self) -> Option<&str> {
+        match &self.content {
+            FileContent::Ready { functions, .. } if !functions.is_empty() => {
+                functions.get(self.focused_function).map(|f| f.name.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    /// Number of functions in the current file.
+    fn function_count(&self) -> usize {
+        match &self.content {
+            FileContent::Ready { functions, .. } => functions.len(),
+            _ => 0,
+        }
+    }
+}
+
+/// Compute the focus range for a given function index, or `None` if no functions.
+fn focus_range(functions: &[FunctionInfo], index: usize) -> Option<std::ops::Range<usize>> {
+    functions.get(index).map(|f| f.start_line..f.end_line)
 }
 
 impl eframe::App for CodeReviewApp {
@@ -244,7 +355,26 @@ impl eframe::App for CodeReviewApp {
         self.poll_file_list(ctx);
         self.poll_pending_content();
 
-        // Arrow key navigation (works in both modes)
+        // When navigating backwards, clamp focused_function to the last function.
+        if self.focused_function == usize::MAX
+            && let FileContent::Ready {
+                jobs,
+                spans,
+                functions,
+            } = &mut self.content
+        {
+            let last = functions.len().saturating_sub(1);
+            self.focused_function = last;
+            let focus = focus_range(functions, last);
+            *jobs = code_viewer::prepare(spans, focus);
+            self.scroll_offset_y = functions
+                .get(last)
+                .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
+                .unwrap_or(0.0);
+            self.scroll_generation += 1;
+        }
+
+        // Arrow key navigation
         if ctx.input(|i| i.key_pressed(Key::ArrowRight)) {
             self.navigate_next(ctx);
         }
@@ -254,6 +384,9 @@ impl eframe::App for CodeReviewApp {
 
         let file_count = self.flat_paths.len();
         let current_pos = self.current_index();
+        let func_name = self.focused_function_name().map(String::from);
+        let func_count = self.function_count();
+        let focused_fn = self.focused_function;
 
         // Top bar
         TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -275,6 +408,18 @@ impl eframe::App for CodeReviewApp {
                         .color(theme::text_muted())
                         .size(12.0),
                 );
+
+                // Show focused function name and counter
+                if let Some(ref name) = func_name {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!("{name}  ({} / {func_count})", focused_fn + 1))
+                            .color(theme::accent())
+                            .size(12.0)
+                            .strong(),
+                    );
+                }
+
                 if !self.scan_complete {
                     ui.spinner();
                 }
@@ -283,7 +428,9 @@ impl eframe::App for CodeReviewApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.checkbox(
                         &mut self.zen_mode,
-                        RichText::new("Zen Mode").size(12.0).color(theme::text_muted()),
+                        RichText::new("Zen Mode")
+                            .size(12.0)
+                            .color(theme::text_muted()),
                     );
                 });
             });
@@ -316,7 +463,9 @@ impl eframe::App for CodeReviewApp {
                             && self.selected_path.as_deref() != Some(path.as_str())
                         {
                             self.selected_path = Some(path.clone());
+                            self.focused_function = 0;
                             self.scroll_generation += 1;
+                            self.scroll_offset_y = 0.0;
                             self.fetch_file_content(&path, ctx);
                         }
                     });
@@ -328,18 +477,28 @@ impl eframe::App for CodeReviewApp {
             TopBottomPanel::bottom("zen_nav").show(ctx, |ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let at_start = current_pos.is_none_or(|i| i == 0);
-                    let at_end = current_pos.is_some_and(|i| i + 1 >= file_count);
+                    let at_start =
+                        current_pos.is_none_or(|i| i == 0) && self.focused_function == 0;
+                    let at_end = current_pos.is_some_and(|i| i + 1 >= file_count)
+                        && (func_count == 0 || self.focused_function + 1 >= func_count);
 
-                    if ui.add_enabled(!at_start, egui::Button::new(
-                        RichText::new("\u{2B05} Prev").size(13.0),
-                    )).clicked() {
+                    if ui
+                        .add_enabled(
+                            !at_start,
+                            egui::Button::new(RichText::new("\u{2B05} Prev").size(13.0)),
+                        )
+                        .clicked()
+                    {
                         self.navigate_prev(ctx);
                     }
 
-                    if ui.add_enabled(!at_end, egui::Button::new(
-                        RichText::new("Next \u{27A1}").size(13.0),
-                    )).clicked() {
+                    if ui
+                        .add_enabled(
+                            !at_end,
+                            egui::Button::new(RichText::new("Next \u{27A1}").size(13.0)),
+                        )
+                        .clicked()
+                    {
                         self.navigate_next(ctx);
                     }
 
@@ -353,11 +512,26 @@ impl eframe::App for CodeReviewApp {
             });
         }
 
+        // Determine scroll offset — only apply on the frame where generation changed.
+        let scroll_y = if self.scroll_generation != self.last_applied_scroll {
+            self.last_applied_scroll = self.scroll_generation;
+            Some(self.scroll_offset_y)
+        } else {
+            None
+        };
+
         // Central panel: code viewer
         CentralPanel::default().show(ctx, |ui| {
             match (&self.selected_path, &self.content) {
-                (Some(path), FileContent::Ready(jobs)) => {
-                    code_viewer::render(ui, jobs, path, self.scroll_generation);
+                (Some(path), FileContent::Ready { jobs, .. }) => {
+                    code_viewer::render(
+                        ui,
+                        jobs,
+                        path,
+                        self.scroll_generation,
+                        scroll_y,
+                        func_name.as_deref(),
+                    );
                 }
                 (Some(_), FileContent::Error(err)) => {
                     ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
@@ -381,9 +555,7 @@ impl eframe::App for CodeReviewApp {
 fn js_encode_uri_component(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' | '/' => {
-                c.to_string()
-            }
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' | '/' => c.to_string(),
             _ => format!("%{:02X}", c as u32),
         })
         .collect()

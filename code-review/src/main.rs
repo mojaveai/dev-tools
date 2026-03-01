@@ -1,4 +1,5 @@
 mod files;
+mod functions;
 mod highlighting;
 mod server;
 
