@@ -1,3 +1,4 @@
+mod call_graph;
 mod files;
 mod functions;
 mod highlighting;

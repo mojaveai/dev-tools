@@ -5,11 +5,12 @@ use egui::text::LayoutJob;
 use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 
 use crate::perf::FrameStats;
+use crate::call_graph::CallGraphState;
 use crate::state::{
-    AsyncData, FileNode, FilePayload, FilesResponse, FunctionInfo, HighlightedLines, SharedAsync,
-    collect_paths, shared_loading,
+    AsyncData, CallEdge, FileNode, FilePayload, FilesResponse, FunctionInfo, HighlightedLines,
+    SharedAsync, collect_paths, shared_loading,
 };
-use crate::{code_viewer, file_browser, theme};
+use crate::{call_graph, code_viewer, file_browser, theme};
 
 /// Response shape for GET /api/file
 #[derive(serde::Deserialize)]
@@ -20,6 +21,8 @@ struct FileResponse {
     content: String,
     highlights: HighlightedLines,
     functions: Vec<FunctionInfo>,
+    #[serde(default)]
+    call_edges: Vec<CallEdge>,
 }
 
 /// Resolved file content — no mutex needed during rendering.
@@ -66,6 +69,10 @@ pub struct CodeReviewApp {
     scroll_offset_y: f32,
     /// Index of the currently focused function within the file.
     focused_function: usize,
+    /// Call graph visualization state — `None` when no call relationships exist.
+    call_graph_state: Option<CallGraphState>,
+    /// Whether the call graph panel is visible.
+    show_call_graph: bool,
 }
 
 impl CodeReviewApp {
@@ -87,6 +94,8 @@ impl CodeReviewApp {
             last_applied_scroll: 0,
             scroll_offset_y: 0.0,
             focused_function: 0,
+            call_graph_state: None,
+            show_call_graph: true,
         }
     }
 
@@ -123,6 +132,7 @@ impl CodeReviewApp {
                         AsyncData::Loaded(FilePayload {
                             highlights: r.highlights,
                             functions: r.functions,
+                            call_edges: r.call_edges,
                         })
                     })
                     .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
@@ -151,6 +161,8 @@ impl CodeReviewApp {
                 self.focused_function = 0;
                 let focus = focus_range(&payload.functions, 0);
                 let jobs = code_viewer::prepare(&payload.highlights, focus);
+                self.call_graph_state =
+                    CallGraphState::build(&payload.functions, &payload.call_edges);
                 self.content = FileContent::Ready {
                     jobs,
                     spans: payload.highlights,
@@ -295,6 +307,9 @@ impl CodeReviewApp {
         self.focused_function = index;
         let focus = focus_range(functions, index);
         *jobs = code_viewer::prepare(spans, focus);
+        if let Some(cg) = &mut self.call_graph_state {
+            cg.update_focus_colors(index, functions);
+        }
         self.apply_function_scroll(index);
         true
     }
@@ -367,6 +382,9 @@ impl eframe::App for CodeReviewApp {
             self.focused_function = last;
             let focus = focus_range(functions, last);
             *jobs = code_viewer::prepare(spans, focus);
+            if let Some(cg) = &mut self.call_graph_state {
+                cg.update_focus_colors(last, functions);
+            }
             self.scroll_offset_y = functions
                 .get(last)
                 .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
@@ -424,11 +442,17 @@ impl eframe::App for CodeReviewApp {
                     ui.spinner();
                 }
 
-                // Right-align the zen mode toggle
+                // Right-align toggles
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.checkbox(
                         &mut self.zen_mode,
                         RichText::new("Zen Mode")
+                            .size(12.0)
+                            .color(theme::text_muted()),
+                    );
+                    ui.checkbox(
+                        &mut self.show_call_graph,
+                        RichText::new("Call Graph")
                             .size(12.0)
                             .color(theme::text_muted()),
                     );
@@ -470,6 +494,60 @@ impl eframe::App for CodeReviewApp {
                         }
                     });
                 });
+        }
+
+        // Right panel: call graph (hidden in zen mode or when toggled off)
+        let mut graph_clicked_fn: Option<usize> = None;
+        if !self.zen_mode && self.show_call_graph {
+            SidePanel::right("call_graph")
+                .default_width(280.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Call Graph")
+                            .strong()
+                            .size(14.0)
+                            .color(theme::text_primary()),
+                    );
+
+                    // Show neighbor stats for focused function.
+                    if let (Some(cg), FileContent::Ready { functions, .. }) =
+                        (&self.call_graph_state, &self.content)
+                    {
+                        let (callers, callees) = cg.neighbor_stats(functions);
+                        ui.label(
+                            RichText::new(format!(
+                                "{callers} caller{}, {callees} callee{}",
+                                if callers == 1 { "" } else { "s" },
+                                if callees == 1 { "" } else { "s" },
+                            ))
+                            .size(11.0)
+                            .color(theme::text_muted()),
+                        );
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    if let Some(cg) = &mut self.call_graph_state {
+                        graph_clicked_fn = call_graph::render(ui, cg);
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.label(
+                                RichText::new("No call relationships")
+                                    .size(12.0)
+                                    .color(theme::text_muted()),
+                            );
+                        });
+                    }
+                });
+        }
+
+        // Handle click on a call graph node — navigate code viewer to that function.
+        if let Some(fn_index) = graph_clicked_fn {
+            self.try_focus_function(fn_index);
         }
 
         // Bottom nav bar (zen mode only, when files are loaded)

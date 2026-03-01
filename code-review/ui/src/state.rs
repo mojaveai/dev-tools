@@ -105,11 +105,19 @@ pub struct FunctionInfo {
     pub end_line: usize,
 }
 
+/// A directed edge representing one function calling another within the same file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CallEdge {
+    pub caller: String,
+    pub callee: String,
+}
+
 /// All data returned by the `/api/file` endpoint needed by the UI.
 #[derive(Debug, Clone)]
 pub struct FilePayload {
     pub highlights: HighlightedLines,
     pub functions: Vec<FunctionInfo>,
+    pub call_edges: Vec<CallEdge>,
 }
 
 /// Collect all file paths from the tree in display order (depth-first, dirs first).
