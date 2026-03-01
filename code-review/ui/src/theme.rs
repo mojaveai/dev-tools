@@ -9,9 +9,15 @@ const TEXT_MUTED: Color32 = Color32::from_rgb(0x6B, 0x6B, 0x7B);
 const ACCENT: Color32 = Color32::from_rgb(0x00, 0x64, 0xB4);
 const ACCENT_LIGHT: Color32 = Color32::from_rgb(0xE3, 0xF0, 0xFA);
 const BORDER: Color32 = Color32::from_rgb(0xE0, 0xE0, 0xDB);
-pub const fn text_primary() -> Color32 { TEXT_PRIMARY }
-pub const fn text_muted() -> Color32 { TEXT_MUTED }
-pub const fn accent() -> Color32 { ACCENT }
+pub const fn text_primary() -> Color32 {
+    TEXT_PRIMARY
+}
+pub const fn text_muted() -> Color32 {
+    TEXT_MUTED
+}
+pub const fn accent() -> Color32 {
+    ACCENT
+}
 
 /// Apply the distill.pub-inspired theme to an egui context.
 pub fn apply(ctx: &egui::Context) {
@@ -46,10 +52,18 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.style()).clone();
-    style.text_styles.insert(TextStyle::Body, FontId::proportional(14.0));
-    style.text_styles.insert(TextStyle::Heading, FontId::proportional(18.0));
-    style.text_styles.insert(TextStyle::Monospace, FontId::monospace(13.0));
-    style.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
+    style
+        .text_styles
+        .insert(TextStyle::Body, FontId::proportional(14.0));
+    style
+        .text_styles
+        .insert(TextStyle::Heading, FontId::proportional(18.0));
+    style
+        .text_styles
+        .insert(TextStyle::Monospace, FontId::monospace(13.0));
+    style
+        .text_styles
+        .insert(TextStyle::Small, FontId::proportional(11.0));
     style.spacing.item_spacing = egui::vec2(8.0, 4.0);
     style.spacing.window_margin = egui::Margin::same(12);
     ctx.set_style(style);

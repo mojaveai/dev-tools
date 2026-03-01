@@ -156,10 +156,6 @@ pub fn render_empty(ui: &mut Ui, zen_mode: bool) {
         "Select a file to view"
     };
     ui.centered_and_justified(|ui| {
-        ui.label(
-            RichText::new(msg)
-                .color(theme::text_muted())
-                .size(18.0),
-        );
+        ui.label(RichText::new(msg).color(theme::text_muted()).size(18.0));
     });
 }

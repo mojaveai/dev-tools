@@ -48,7 +48,10 @@ pub fn safe_resolve(root: &Path, relative: &str) -> Option<PathBuf> {
     }
 
     // Reject any `..` components
-    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return None;
     }
 

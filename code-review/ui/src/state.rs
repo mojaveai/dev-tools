@@ -120,11 +120,27 @@ pub struct FunctionRef {
     pub start_line: usize,
 }
 
-/// Direct caller/callee relationships for a function.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CallTreeNode {
+    pub function: FunctionRef,
+    #[serde(default)]
+    pub children: Vec<CallTreeNode>,
+    #[serde(default)]
+    pub cycle: bool,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// Caller/callee trees plus transitive test-callers for a function.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct FunctionRelations {
-    pub callers: Vec<FunctionRef>,
-    pub callees: Vec<FunctionRef>,
+    pub focus: Option<FunctionRef>,
+    #[serde(default)]
+    pub test_callers: Vec<FunctionRef>,
+    #[serde(default)]
+    pub caller_tree: Vec<CallTreeNode>,
+    #[serde(default)]
+    pub callee_tree: Vec<CallTreeNode>,
 }
 
 /// Collect all file paths from the tree in display order (depth-first, dirs first).

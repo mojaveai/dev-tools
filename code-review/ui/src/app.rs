@@ -6,8 +6,8 @@ use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 
 use crate::perf::FrameStats;
 use crate::state::{
-    AsyncData, FileNode, FilePayload, FilesResponse, FunctionInfo, FunctionRef, FunctionRelations,
-    HighlightedLines, SharedAsync, collect_paths, shared_loading,
+    AsyncData, CallTreeNode, FileNode, FilePayload, FilesResponse, FunctionInfo, FunctionRef,
+    FunctionRelations, HighlightedLines, SharedAsync, collect_paths, shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -20,13 +20,6 @@ struct FileResponse {
     content: String,
     highlights: HighlightedLines,
     functions: Vec<FunctionInfo>,
-}
-
-/// Response shape for GET /api/function-relations
-#[derive(serde::Deserialize)]
-struct FunctionRelationsResponse {
-    callers: Vec<FunctionRef>,
-    callees: Vec<FunctionRef>,
 }
 
 /// Resolved file content — no mutex needed during rendering.
@@ -167,16 +160,9 @@ impl CodeReviewApp {
 
         ehttp::fetch(ehttp::Request::get(&url), move |result| {
             let value = match result {
-                Ok(response) => {
-                    serde_json::from_slice::<FunctionRelationsResponse>(&response.bytes)
-                        .map(|resp| {
-                            AsyncData::Loaded(FunctionRelations {
-                                callers: resp.callers,
-                                callees: resp.callees,
-                            })
-                        })
-                        .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
-                }
+                Ok(response) => serde_json::from_slice::<FunctionRelations>(&response.bytes)
+                    .map(AsyncData::Loaded)
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
                 Err(err) => AsyncData::Error(err),
             };
             *shared.lock().unwrap() = value;
@@ -432,6 +418,17 @@ impl CodeReviewApp {
         }
     }
 
+    fn focused_function_ref(&self) -> Option<FunctionRef> {
+        match (&self.selected_path, self.focused_function_info()) {
+            (Some(path), Some(function)) => Some(FunctionRef {
+                path: path.clone(),
+                name: function.name.clone(),
+                start_line: function.start_line,
+            }),
+            _ => None,
+        }
+    }
+
     fn render_relations_panel(&self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.label(
@@ -444,7 +441,15 @@ impl CodeReviewApp {
         ui.separator();
         ui.add_space(8.0);
 
-        let Some(focused) = self.focused_function_info() else {
+        let focused = match &self.relations {
+            FunctionRelationsState::Ready(relations) => relations
+                .focus
+                .clone()
+                .or_else(|| self.focused_function_ref()),
+            _ => self.focused_function_ref(),
+        };
+
+        let Some(focused) = focused else {
             ui.label(
                 RichText::new("No focused function")
                     .size(12.0)
@@ -453,16 +458,7 @@ impl CodeReviewApp {
             return;
         };
 
-        ui.label(
-            RichText::new(format!(
-                "{}  (line {})",
-                focused.name,
-                focused.start_line + 1
-            ))
-            .size(12.0)
-            .color(theme::accent())
-            .strong(),
-        );
+        self.render_function_title(ui, &focused);
         ui.add_space(8.0);
 
         if self.pending_relations.is_some() {
@@ -479,14 +475,25 @@ impl CodeReviewApp {
 
         match &self.relations {
             FunctionRelationsState::Ready(relations) => {
-                self.render_relation_section(
+                self.render_tree_section(
                     ui,
-                    "Direct Callees",
-                    &relations.callees,
+                    "Callees",
+                    &relations.callee_tree,
                     "No direct callees",
+                    "callee",
+                    "Expand nodes to walk down the call stack",
                 );
                 ui.add_space(8.0);
-                self.render_relation_section(ui, "Callers", &relations.callers, "No callers");
+                self.render_tree_section(
+                    ui,
+                    "Callers",
+                    &relations.caller_tree,
+                    "No callers",
+                    "caller",
+                    "Expand nodes to walk up the call stack",
+                );
+                ui.add_space(8.0);
+                self.render_test_section(ui, &relations.test_callers);
             }
             FunctionRelationsState::Error(err) => {
                 ui.colored_label(egui::Color32::RED, format!("Call graph error: {err}"));
@@ -501,47 +508,229 @@ impl CodeReviewApp {
         }
     }
 
-    fn render_relation_section(
+    fn render_function_title(&self, ui: &mut egui::Ui, function: &FunctionRef) {
+        egui::Frame {
+            fill: egui::Color32::from_rgb(0xEF, 0xF3, 0xF7),
+            stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(0xD7, 0xDF, 0xE7)),
+            corner_radius: egui::CornerRadius::same(6),
+            inner_margin: egui::Margin::symmetric(8, 6),
+            ..Default::default()
+        }
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new("FOCUS")
+                        .size(9.5)
+                        .monospace()
+                        .color(theme::text_muted()),
+                );
+                ui.label(
+                    RichText::new(function.name.as_str())
+                        .size(13.0)
+                        .strong()
+                        .color(theme::text_primary()),
+                );
+            });
+            ui.label(
+                RichText::new(format!("{}:{}", function.path, function.start_line + 1))
+                    .size(10.5)
+                    .monospace()
+                    .color(theme::text_muted()),
+            );
+        });
+    }
+
+    fn render_function_entry(
+        &self,
+        ui: &mut egui::Ui,
+        function: &FunctionRef,
+        depth: usize,
+        cycle: bool,
+        is_test: bool,
+    ) {
+        let fill = match depth % 3 {
+            0 => egui::Color32::from_rgb(0xFA, 0xFA, 0xF8),
+            1 => egui::Color32::from_rgb(0xF6, 0xF6, 0xF3),
+            _ => egui::Color32::from_rgb(0xF2, 0xF2, 0xEF),
+        };
+        let border = if cycle {
+            theme::accent()
+        } else {
+            egui::Color32::from_rgb(0xDF, 0xDF, 0xD9)
+        };
+
+        egui::Frame {
+            fill,
+            stroke: egui::Stroke::new(1.0, border),
+            corner_radius: egui::CornerRadius::same(6),
+            inner_margin: egui::Margin::symmetric(8, 5),
+            ..Default::default()
+        }
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(function.name.as_str())
+                        .size(12.0)
+                        .strong()
+                        .color(theme::text_primary()),
+                );
+
+                if is_test {
+                    ui.label(
+                        RichText::new("TEST")
+                            .size(9.5)
+                            .monospace()
+                            .background_color(egui::Color32::from_rgb(0xE6, 0xF3, 0xEC))
+                            .color(egui::Color32::from_rgb(0x2E, 0x6A, 0x45)),
+                    );
+                }
+
+                if cycle {
+                    ui.label(
+                        RichText::new("CYCLE")
+                            .size(9.5)
+                            .monospace()
+                            .background_color(egui::Color32::from_rgb(0xF6, 0xE8, 0xE3))
+                            .color(theme::accent()),
+                    );
+                }
+            });
+
+            ui.label(
+                RichText::new(format!("{}:{}", function.path, function.start_line + 1))
+                    .size(10.5)
+                    .monospace()
+                    .color(theme::text_muted()),
+            );
+        });
+    }
+
+    fn render_tree_section(
         &self,
         ui: &mut egui::Ui,
         title: &str,
-        items: &[FunctionRef],
+        items: &[CallTreeNode],
         empty_msg: &str,
+        id_prefix: &str,
+        hint: &str,
     ) {
-        ui.label(
-            RichText::new(title)
+        egui::CollapsingHeader::new(
+            RichText::new(format!("{title} ({})", items.len()))
                 .size(12.0)
-                .color(theme::text_primary())
-                .strong(),
-        );
-        ui.add_space(4.0);
+                .strong()
+                .color(theme::text_primary()),
+        )
+        .id_salt(("call-tree-section", id_prefix))
+        .default_open(false)
+        .show(ui, |ui| {
+            if items.is_empty() {
+                ui.label(
+                    RichText::new(empty_msg)
+                        .size(11.0)
+                        .color(theme::text_muted()),
+                );
+                return;
+            }
 
-        if items.is_empty() {
+            ui.label(RichText::new(hint).size(10.5).color(theme::text_muted()));
+            ui.add_space(4.0);
+            self.render_tree_nodes(ui, items, id_prefix, 0);
+        });
+    }
+
+    fn render_test_section(&self, ui: &mut egui::Ui, items: &[FunctionRef]) {
+        egui::CollapsingHeader::new(
+            RichText::new(format!("Tests ({})", items.len()))
+                .size(12.0)
+                .strong()
+                .color(theme::text_primary()),
+        )
+        .id_salt("call-tree-tests")
+        .default_open(false)
+        .show(ui, |ui| {
+            if items.is_empty() {
+                ui.label(
+                    RichText::new("No tests exercise this function")
+                        .size(11.0)
+                        .color(theme::text_muted()),
+                );
+                return;
+            }
+
             ui.label(
-                RichText::new(empty_msg)
-                    .size(11.0)
+                RichText::new("Includes direct and indirect test callers")
+                    .size(10.5)
                     .color(theme::text_muted()),
             );
+            ui.add_space(4.0);
+            items.iter().for_each(|item| {
+                self.render_function_entry(ui, item, 0, false, true);
+                ui.add_space(3.0);
+            });
+        });
+    }
+
+    fn render_tree_nodes(
+        &self,
+        ui: &mut egui::Ui,
+        items: &[CallTreeNode],
+        id_prefix: &str,
+        depth: usize,
+    ) {
+        items.iter().enumerate().for_each(|(index, item)| {
+            let id = format!(
+                "{id_prefix}:{depth}:{index}:{}:{}",
+                item.function.path, item.function.start_line
+            );
+            self.render_tree_node(ui, item, id.as_str(), depth + 1);
+            if index + 1 < items.len() {
+                ui.add_space(3.0);
+            }
+        });
+    }
+
+    fn render_tree_node(
+        &self,
+        ui: &mut egui::Ui,
+        item: &CallTreeNode,
+        node_id: &str,
+        depth: usize,
+    ) {
+        if item.children.is_empty() {
+            let indent = (depth.saturating_sub(1) as f32 * 12.0).min(72.0);
+            ui.horizontal(|ui| {
+                ui.add_space(indent);
+                self.render_function_entry(ui, &item.function, depth, item.cycle, false);
+            });
+
+            if item.truncated {
+                ui.label(
+                    RichText::new("... more nodes omitted")
+                        .size(10.0)
+                        .monospace()
+                        .color(theme::text_muted()),
+                );
+            }
             return;
         }
 
-        egui::ScrollArea::vertical()
-            .max_height(180.0)
-            .show(ui, |ui| {
-                items.iter().for_each(|item| {
-                    ui.label(
-                        RichText::new(format!(
-                            "{}:{}  {}",
-                            item.path,
-                            item.start_line + 1,
-                            item.name
-                        ))
-                        .size(11.0)
-                        .monospace()
-                        .color(theme::text_primary()),
-                    );
+        let id = ui.make_persistent_id(("call-tree-node", node_id));
+        let _ =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                .show_header(ui, |ui| {
+                    self.render_function_entry(ui, &item.function, depth, item.cycle, false);
+                })
+                .body(|ui| {
+                    self.render_tree_nodes(ui, &item.children, node_id, depth);
+                    if item.truncated {
+                        ui.label(
+                            RichText::new("... more nodes omitted")
+                                .size(10.0)
+                                .monospace()
+                                .color(theme::text_muted()),
+                        );
+                    }
                 });
-            });
     }
 }
 
@@ -690,7 +879,9 @@ impl eframe::App for CodeReviewApp {
             .default_width(320.0)
             .resizable(true)
             .show(ctx, |ui| {
-                self.render_relations_panel(ui);
+                egui::ScrollArea::vertical()
+                    .id_salt("function_relations_scroll")
+                    .show(ui, |ui| self.render_relations_panel(ui));
             });
 
         // Bottom nav bar (zen mode only, when files are loaded)

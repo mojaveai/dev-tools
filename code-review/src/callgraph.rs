@@ -18,8 +18,20 @@ pub struct FunctionRef {
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
 pub struct FunctionRelations {
+    pub focus: Option<FunctionRef>,
     pub callers: Vec<FunctionRef>,
     pub callees: Vec<FunctionRef>,
+    pub test_callers: Vec<FunctionRef>,
+    pub caller_tree: Vec<CallTreeNode>,
+    pub callee_tree: Vec<CallTreeNode>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CallTreeNode {
+    pub function: FunctionRef,
+    pub children: Vec<CallTreeNode>,
+    pub cycle: bool,
+    pub truncated: bool,
 }
 
 #[derive(Default)]
@@ -149,6 +161,27 @@ struct CallGraphIndex {
     callees: Vec<BTreeSet<usize>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TraversalDirection {
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TraversalLimits {
+    max_depth: usize,
+    max_nodes: usize,
+}
+
+impl Default for TraversalLimits {
+    fn default() -> Self {
+        Self {
+            max_depth: 20,
+            max_nodes: 1200,
+        }
+    }
+}
+
 impl CallGraphIndex {
     fn relationships_for(&self, path: &str, start_line: usize) -> FunctionRelations {
         let key = FunctionKey {
@@ -162,6 +195,7 @@ impl CallGraphIndex {
 
         let callers = self.callers[id]
             .iter()
+            .filter(|&&caller| !self.is_test_function(caller))
             .map(|&caller| self.to_public_ref(caller))
             .collect();
 
@@ -170,7 +204,16 @@ impl CallGraphIndex {
             .map(|&callee| self.to_public_ref(callee))
             .collect();
 
-        FunctionRelations { callers, callees }
+        FunctionRelations {
+            focus: Some(self.to_public_ref(id)),
+            callers,
+            callees,
+            test_callers: self.transitive_test_callers(id),
+            caller_tree: self.tree_from(id, TraversalDirection::Up, |candidate| {
+                !self.is_test_function(candidate)
+            }),
+            callee_tree: self.tree_from(id, TraversalDirection::Down, |_| true),
+        }
     }
 
     fn to_public_ref(&self, id: usize) -> FunctionRef {
@@ -179,6 +222,172 @@ impl CallGraphIndex {
             path: function.path.clone(),
             name: function.name.clone(),
             start_line: function.start_line,
+        }
+    }
+
+    fn transitive_test_callers(&self, function_id: usize) -> Vec<FunctionRef> {
+        let mut visited = BTreeSet::new();
+        let mut stack: Vec<usize> = self.callers[function_id].iter().copied().collect();
+        let mut tests = BTreeSet::new();
+
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+
+            if self.is_test_function(id) {
+                tests.insert(id);
+            }
+
+            self.callers[id]
+                .iter()
+                .filter(|&&caller| !visited.contains(&caller))
+                .for_each(|&caller| stack.push(caller));
+        }
+
+        tests
+            .into_iter()
+            .map(|test_id| self.to_public_ref(test_id))
+            .collect()
+    }
+
+    fn is_test_function(&self, id: usize) -> bool {
+        let function = &self.functions[id];
+        is_test_function_name(function.path.as_str(), function.name.as_str())
+    }
+
+    fn tree_from<F>(
+        &self,
+        function_id: usize,
+        direction: TraversalDirection,
+        include: F,
+    ) -> Vec<CallTreeNode>
+    where
+        F: Fn(usize) -> bool + Copy,
+    {
+        let limits = TraversalLimits::default();
+        let mut remaining = limits.max_nodes;
+        let mut path = BTreeSet::from([function_id]);
+
+        self.neighbors(function_id, direction)
+            .iter()
+            .copied()
+            .filter(|&neighbor| include(neighbor))
+            .scan(false, |exhausted, neighbor| {
+                if *exhausted {
+                    return None;
+                }
+
+                if remaining == 0 {
+                    *exhausted = true;
+                    return None;
+                }
+
+                Some(self.tree_node(
+                    neighbor,
+                    direction,
+                    include,
+                    &limits,
+                    &mut remaining,
+                    1,
+                    &mut path,
+                ))
+            })
+            .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tree_node<F>(
+        &self,
+        function_id: usize,
+        direction: TraversalDirection,
+        include: F,
+        limits: &TraversalLimits,
+        remaining: &mut usize,
+        depth: usize,
+        path: &mut BTreeSet<usize>,
+    ) -> CallTreeNode
+    where
+        F: Fn(usize) -> bool + Copy,
+    {
+        let function = self.to_public_ref(function_id);
+        if *remaining == 0 {
+            return CallTreeNode {
+                function,
+                children: Vec::new(),
+                cycle: false,
+                truncated: true,
+            };
+        }
+
+        *remaining -= 1;
+
+        if depth >= limits.max_depth {
+            let has_more = self
+                .neighbors(function_id, direction)
+                .iter()
+                .any(|&neighbor| include(neighbor) && !path.contains(&neighbor));
+            return CallTreeNode {
+                function,
+                children: Vec::new(),
+                cycle: false,
+                truncated: has_more,
+            };
+        }
+
+        path.insert(function_id);
+        let mut truncated = false;
+        let mut children = Vec::new();
+
+        for &neighbor in self.neighbors(function_id, direction) {
+            if !include(neighbor) {
+                continue;
+            }
+
+            if path.contains(&neighbor) {
+                if *remaining == 0 {
+                    truncated = true;
+                    continue;
+                }
+                *remaining -= 1;
+                children.push(CallTreeNode {
+                    function: self.to_public_ref(neighbor),
+                    children: Vec::new(),
+                    cycle: true,
+                    truncated: false,
+                });
+                continue;
+            }
+
+            if *remaining == 0 {
+                truncated = true;
+                continue;
+            }
+
+            children.push(self.tree_node(
+                neighbor,
+                direction,
+                include,
+                limits,
+                remaining,
+                depth + 1,
+                path,
+            ));
+        }
+        path.remove(&function_id);
+
+        CallTreeNode {
+            function,
+            children,
+            cycle: false,
+            truncated,
+        }
+    }
+
+    fn neighbors(&self, function_id: usize, direction: TraversalDirection) -> &BTreeSet<usize> {
+        match direction {
+            TraversalDirection::Up => &self.callers[function_id],
+            TraversalDirection::Down => &self.callees[function_id],
         }
     }
 }
@@ -1293,6 +1502,15 @@ fn module_name_from_path(path: &str) -> (String, bool) {
     (no_ext.replace('/', "."), false)
 }
 
+fn is_test_function_name(path: &str, name: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let in_tests_dir = path.starts_with("tests/") || path.contains("/tests/");
+    let test_file = file.starts_with("test_") || file.ends_with("_test.py");
+    let test_name = name == "test" || name.starts_with("test_") || name.ends_with("_test");
+
+    in_tests_dir || test_file || test_name
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1312,6 +1530,18 @@ mod tests {
         items
             .iter()
             .map(|item| format!("{}:{}:{}", item.path, item.start_line, item.name))
+            .collect()
+    }
+
+    fn tree_targets(items: &[CallTreeNode]) -> Vec<String> {
+        items
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}:{}:{}",
+                    item.function.path, item.function.start_line, item.function.name
+                )
+            })
             .collect()
     }
 
@@ -1436,6 +1666,73 @@ mod tests {
             relation_targets(&rel.callers),
             vec!["main.py:2:caller".to_owned()]
         );
+    }
+
+    #[test]
+    fn separates_transitive_test_callers_from_regular_callers() {
+        let index = build_index(&[
+            ("core.py", "def target():\n    return 1\n"),
+            (
+                "pipeline.py",
+                "from core import target\n\ndef helper():\n    target()\n\ndef run():\n    helper()\n",
+            ),
+            (
+                "tests/test_core.py",
+                "from pipeline import run\n\ndef test_run():\n    run()\n",
+            ),
+            (
+                "tests/test_target.py",
+                "from core import target\n\ndef test_target():\n    target()\n",
+            ),
+        ]);
+
+        let rel = index.relationships_for("core.py", 0);
+
+        assert_eq!(
+            relation_targets(&rel.callers),
+            vec!["pipeline.py:2:helper".to_owned()]
+        );
+        assert_eq!(
+            relation_targets(&rel.test_callers),
+            vec![
+                "tests/test_core.py:2:test_run".to_owned(),
+                "tests/test_target.py:2:test_target".to_owned()
+            ]
+        );
+        assert_eq!(
+            tree_targets(&rel.caller_tree),
+            vec!["pipeline.py:2:helper".to_owned()]
+        );
+    }
+
+    #[test]
+    fn marks_cycles_in_callee_tree_for_mutual_recursion() {
+        let index = build_index(&[("cycle.py", "def a():\n    b()\n\ndef b():\n    a()\n")]);
+
+        let rel = index.relationships_for("cycle.py", 0);
+        assert_eq!(
+            tree_targets(&rel.callee_tree),
+            vec!["cycle.py:3:b".to_owned()]
+        );
+        assert_eq!(rel.callee_tree.len(), 1);
+        assert_eq!(rel.callee_tree[0].children.len(), 1);
+        assert!(rel.callee_tree[0].children[0].cycle);
+        assert_eq!(rel.callee_tree[0].children[0].function.name, "a");
+    }
+
+    #[test]
+    fn marks_cycles_in_caller_tree_for_mutual_recursion() {
+        let index = build_index(&[("cycle.py", "def a():\n    b()\n\ndef b():\n    a()\n")]);
+
+        let rel = index.relationships_for("cycle.py", 3);
+        assert_eq!(
+            tree_targets(&rel.caller_tree),
+            vec!["cycle.py:0:a".to_owned()]
+        );
+        assert_eq!(rel.caller_tree.len(), 1);
+        assert_eq!(rel.caller_tree[0].children.len(), 1);
+        assert!(rel.caller_tree[0].children[0].cycle);
+        assert_eq!(rel.caller_tree[0].children[0].function.name, "b");
     }
 
     #[test]

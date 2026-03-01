@@ -5,8 +5,8 @@ mod perf;
 mod state;
 mod theme;
 
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 /// Handle exposed to JavaScript for lifecycle management.
 #[wasm_bindgen]

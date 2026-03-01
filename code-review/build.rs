@@ -56,7 +56,10 @@ fn main() {
     let wasm_bg_path = wasm_dist_dir.join("code_review_ui_bg.wasm");
 
     assert!(js_path.exists(), "JS glue not found at {js_path:?}");
-    assert!(wasm_bg_path.exists(), "WASM bg not found at {wasm_bg_path:?}");
+    assert!(
+        wasm_bg_path.exists(),
+        "WASM bg not found at {wasm_bg_path:?}"
+    );
 
     println!("cargo::rustc-env=WASM_JS_PATH={}", js_path.display());
     println!("cargo::rustc-env=WASM_BG_PATH={}", wasm_bg_path.display());
