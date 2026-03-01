@@ -19,7 +19,7 @@ pub fn prepare(lines: &[Vec<StyledSpan>]) -> Vec<LayoutJob> {
 ///
 /// Uses `ScrollArea::show_rows` so only visible lines are laid out each frame,
 /// keeping the per-frame cost constant regardless of file length.
-pub fn render(ui: &mut Ui, jobs: &[LayoutJob], path: &str) {
+pub fn render(ui: &mut Ui, jobs: &[LayoutJob], path: &str, scroll_generation: u64) {
     ui.vertical(|ui| {
         // File path header
         ui.horizontal(|ui| {
@@ -35,6 +35,7 @@ pub fn render(ui: &mut Ui, jobs: &[LayoutJob], path: &str) {
         ui.add_space(4.0);
 
         ScrollArea::both()
+            .id_salt(scroll_generation)
             .auto_shrink([false, false])
             .show_rows(ui, ROW_HEIGHT, jobs.len(), |ui, visible_range| {
                 for i in visible_range {

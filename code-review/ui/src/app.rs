@@ -51,6 +51,8 @@ pub struct CodeReviewApp {
     scan_complete: bool,
     /// egui time at which to fire the next file-list poll.
     poll_files_after: Option<f64>,
+    /// Bumped on every file change so the scroll area resets to top.
+    scroll_generation: u64,
 }
 
 impl CodeReviewApp {
@@ -68,6 +70,7 @@ impl CodeReviewApp {
             known_file_count: 0,
             scan_complete: false,
             poll_files_after: None,
+            scroll_generation: 0,
         }
     }
 
@@ -199,6 +202,7 @@ impl CodeReviewApp {
     fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
         if let Some(path) = self.flat_paths.get(index).cloned() {
             self.selected_path = Some(path.clone());
+            self.scroll_generation += 1;
             self.fetch_file_content(&path, ctx);
         }
     }
@@ -312,6 +316,7 @@ impl eframe::App for CodeReviewApp {
                             && self.selected_path.as_deref() != Some(path.as_str())
                         {
                             self.selected_path = Some(path.clone());
+                            self.scroll_generation += 1;
                             self.fetch_file_content(&path, ctx);
                         }
                     });
@@ -352,7 +357,7 @@ impl eframe::App for CodeReviewApp {
         CentralPanel::default().show(ctx, |ui| {
             match (&self.selected_path, &self.content) {
                 (Some(path), FileContent::Ready(jobs)) => {
-                    code_viewer::render(ui, jobs, path);
+                    code_viewer::render(ui, jobs, path, self.scroll_generation);
                 }
                 (Some(_), FileContent::Error(err)) => {
                     ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
