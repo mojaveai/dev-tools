@@ -103,6 +103,13 @@ pub enum FileScope {
     All,
 }
 
+/// A block of deleted lines that appeared before a given line in the new file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DeletedSection {
+    pub before_line: usize,
+    pub lines: Vec<String>,
+}
+
 /// Response from GET /api/diff
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct DiffResponse {
@@ -111,7 +118,9 @@ pub struct DiffResponse {
     #[allow(dead_code)]
     pub mode: DiffMode,
     pub line_statuses: Vec<LineStatus>,
+    #[allow(dead_code)]
     pub deleted_before: Vec<usize>,
+    pub deleted_sections: Vec<DeletedSection>,
 }
 
 /// Response from GET /api/diff/files
@@ -122,11 +131,11 @@ pub struct DiffFilesResponse {
     pub changed_files: Vec<String>,
 }
 
-/// Pre-resolved diff data passed into the code viewer for gutter painting.
+/// Pre-resolved diff data passed into the code viewer for rendering.
 #[derive(Debug, Clone)]
 pub struct DiffData {
     pub line_statuses: Vec<LineStatus>,
-    pub deleted_before: Vec<usize>,
+    pub deleted_sections: Vec<DeletedSection>,
 }
 
 /// Response shape for GET /api/files — includes scanning progress.

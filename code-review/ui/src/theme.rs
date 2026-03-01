@@ -22,8 +22,9 @@ struct Palette {
     cycle_badge_bg: Color32,
     unfocused_code: Color32,
     diff_added: Color32,
-    diff_modified: Color32,
     diff_deleted: Color32,
+    diff_added_bg: Color32,
+    diff_deleted_bg: Color32,
 }
 
 const LIGHT: Palette = Palette {
@@ -48,8 +49,9 @@ const LIGHT: Palette = Palette {
     cycle_badge_bg: Color32::from_rgb(0xF6, 0xE8, 0xE3),
     unfocused_code: Color32::from_rgb(0xCC, 0xCC, 0xCC),
     diff_added: Color32::from_rgb(0x2D, 0xA4, 0x4E),
-    diff_modified: Color32::from_rgb(0xDB, 0xAB, 0x09),
     diff_deleted: Color32::from_rgb(0xCF, 0x22, 0x2E),
+    diff_added_bg: Color32::from_rgb(0xE6, 0xFF, 0xEC),
+    diff_deleted_bg: Color32::from_rgb(0xFF, 0xEB, 0xE9),
 };
 
 const DARK: Palette = Palette {
@@ -74,8 +76,9 @@ const DARK: Palette = Palette {
     cycle_badge_bg: Color32::from_rgb(0x3A, 0x25, 0x20),
     unfocused_code: Color32::from_rgb(0x5C, 0x66, 0x74),
     diff_added: Color32::from_rgb(0x3F, 0xB9, 0x50),
-    diff_modified: Color32::from_rgb(0xE3, 0xB3, 0x41),
     diff_deleted: Color32::from_rgb(0xDA, 0x3B, 0x3B),
+    diff_added_bg: Color32::from_rgb(0x0D, 0x28, 0x18),
+    diff_deleted_bg: Color32::from_rgb(0x2D, 0x0F, 0x0F),
 };
 
 fn palette(theme: Theme) -> Palette {
@@ -203,10 +206,14 @@ pub fn diff_added(ui: &egui::Ui) -> Color32 {
     palette_for_ui(ui).diff_added
 }
 
-pub fn diff_modified(ui: &egui::Ui) -> Color32 {
-    palette_for_ui(ui).diff_modified
-}
-
 pub fn diff_deleted(ui: &egui::Ui) -> Color32 {
     palette_for_ui(ui).diff_deleted
+}
+
+pub fn diff_added_bg(ui: &egui::Ui) -> Color32 {
+    palette_for_ui(ui).diff_added_bg
+}
+
+pub fn diff_deleted_bg(ui: &egui::Ui) -> Color32 {
+    palette_for_ui(ui).diff_deleted_bg
 }

@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 
 use tracing::{info, warn};
 
-const DEFAULT_PORT: u16 = 3000;
+const DEFAULT_PORT: u16 = 6357;
 const MAX_PORT_ATTEMPTS: u16 = 100;
 
 #[tokio::main]

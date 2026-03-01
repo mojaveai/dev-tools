@@ -21,6 +21,15 @@ pub enum LineStatus {
     Modified,
 }
 
+/// A block of contiguous deleted lines that appeared before a given line.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DeletedSection {
+    /// The new-file line index these deletions appear before.
+    pub before_line: usize,
+    /// The actual text content of each deleted line.
+    pub lines: Vec<String>,
+}
+
 /// Parsed diff information for a single file.
 #[derive(Serialize, Clone, Debug)]
 pub struct FileDiff {
@@ -28,6 +37,8 @@ pub struct FileDiff {
     pub line_statuses: Vec<LineStatus>,
     /// Indices of lines that have deleted lines immediately before them.
     pub deleted_before: Vec<usize>,
+    /// Actual content of deleted lines, grouped by their position.
+    pub deleted_sections: Vec<DeletedSection>,
 }
 
 // ── Git CLI helpers ─────────────────────────────────────────────────
@@ -119,18 +130,26 @@ async fn unified_diff(root: &Path, path: &str, mode: DiffMode) -> Result<String,
 pub fn parse_unified_diff(diff_text: &str, total_lines: usize) -> FileDiff {
     let mut statuses = vec![LineStatus::Unchanged; total_lines];
     let mut deleted_before: Vec<usize> = Vec::new();
+    let mut deleted_sections: Vec<DeletedSection> = Vec::new();
 
     for hunk in HunkIter::new(diff_text) {
         let mut new_line = hunk.new_start; // 0-indexed
         let mut pending_removes: usize = 0;
+        let mut pending_removed_lines: Vec<String> = Vec::new();
 
         for raw_line in hunk.lines {
             if let Some(rest) = raw_line.strip_prefix('-') {
-                // Deletion — don't advance new_line
-                let _ = rest;
                 pending_removes += 1;
+                pending_removed_lines.push(rest.to_owned());
             } else if let Some(rest) = raw_line.strip_prefix('+') {
                 let _ = rest;
+                // Flush all pending deleted lines before the first + after a - block
+                if !pending_removed_lines.is_empty() && new_line <= total_lines {
+                    deleted_sections.push(DeletedSection {
+                        before_line: new_line.min(total_lines),
+                        lines: std::mem::take(&mut pending_removed_lines),
+                    });
+                }
                 if new_line < total_lines {
                     if pending_removes > 0 {
                         statuses[new_line] = LineStatus::Modified;
@@ -141,8 +160,15 @@ pub fn parse_unified_diff(diff_text: &str, total_lines: usize) -> FileDiff {
                 }
                 new_line += 1;
             } else {
-                // Context line (starts with ' ' or is the line itself)
+                // Context line — flush pending deletions
+                if !pending_removed_lines.is_empty() && new_line <= total_lines {
+                    deleted_sections.push(DeletedSection {
+                        before_line: new_line.min(total_lines),
+                        lines: std::mem::take(&mut pending_removed_lines),
+                    });
+                }
                 if pending_removes > 0 {
+                    // Pure deletions (no matching + lines) — record position
                     if new_line < total_lines {
                         deleted_before.push(new_line);
                     }
@@ -153,6 +179,12 @@ pub fn parse_unified_diff(diff_text: &str, total_lines: usize) -> FileDiff {
         }
 
         // Trailing deletions at end of hunk
+        if !pending_removed_lines.is_empty() {
+            deleted_sections.push(DeletedSection {
+                before_line: new_line.min(total_lines),
+                lines: pending_removed_lines,
+            });
+        }
         if pending_removes > 0 && new_line < total_lines {
             deleted_before.push(new_line);
         }
@@ -161,10 +193,24 @@ pub fn parse_unified_diff(diff_text: &str, total_lines: usize) -> FileDiff {
     deleted_before.sort_unstable();
     deleted_before.dedup();
 
+    // Merge sections at the same position and sort
+    deleted_sections.sort_by_key(|s| s.before_line);
+    let mut merged: Vec<DeletedSection> = Vec::new();
+    for section in deleted_sections {
+        if let Some(last) = merged.last_mut()
+            && last.before_line == section.before_line
+        {
+            last.lines.extend(section.lines);
+            continue;
+        }
+        merged.push(section);
+    }
+
     FileDiff {
         path: String::new(),
         line_statuses: statuses,
         deleted_before,
+        deleted_sections: merged,
     }
 }
 
@@ -312,6 +358,7 @@ impl GitDiffStore {
                     path: path.to_owned(),
                     line_statuses: vec![LineStatus::Added; total_lines],
                     deleted_before: Vec::new(),
+                    deleted_sections: Vec::new(),
                 }
             } else {
                 // No changes
@@ -319,6 +366,7 @@ impl GitDiffStore {
                     path: path.to_owned(),
                     line_statuses: vec![LineStatus::Unchanged; total_lines],
                     deleted_before: Vec::new(),
+                    deleted_sections: Vec::new(),
                 }
             }
         } else {
@@ -487,5 +535,84 @@ new file mode 100644
         assert_eq!(result.line_statuses[0], LineStatus::Added);
         assert_eq!(result.line_statuses[1], LineStatus::Added);
         assert_eq!(result.line_statuses[2], LineStatus::Added);
+        assert!(result.deleted_sections.is_empty());
+    }
+
+    #[test]
+    fn deleted_sections_captures_modification_content() {
+        let diff = "\
+diff --git a/hello.py b/hello.py
+--- a/hello.py
++++ b/hello.py
+@@ -1,3 +1,3 @@
+ line1
+-old_line
++new_line
+ line3
+";
+        let result = parse_unified_diff(diff, 3);
+        assert_eq!(result.deleted_sections.len(), 1);
+        assert_eq!(result.deleted_sections[0].before_line, 1);
+        assert_eq!(result.deleted_sections[0].lines, vec!["old_line"]);
+    }
+
+    #[test]
+    fn deleted_sections_captures_pure_deletion() {
+        let diff = "\
+diff --git a/hello.py b/hello.py
+--- a/hello.py
++++ b/hello.py
+@@ -1,4 +1,3 @@
+ line1
+-removed
+ line3
+ line4
+";
+        let result = parse_unified_diff(diff, 3);
+        assert_eq!(result.deleted_sections.len(), 1);
+        assert_eq!(result.deleted_sections[0].before_line, 1);
+        assert_eq!(result.deleted_sections[0].lines, vec!["removed"]);
+    }
+
+    #[test]
+    fn deleted_sections_mixed_changes() {
+        // 2 removals + 3 additions: all removed content grouped before first + line
+        let diff = "\
+diff --git a/hello.py b/hello.py
+--- a/hello.py
++++ b/hello.py
+@@ -1,4 +1,5 @@
+ line1
+-old_a
+-old_b
++new_a
++new_b
++new_c
+ line4
+";
+        let result = parse_unified_diff(diff, 5);
+        assert_eq!(result.deleted_sections.len(), 1);
+        assert_eq!(result.deleted_sections[0].before_line, 1);
+        assert_eq!(
+            result.deleted_sections[0].lines,
+            vec!["old_a", "old_b"]
+        );
+    }
+
+    #[test]
+    fn deleted_sections_no_content_for_additions() {
+        let diff = "\
+diff --git a/hello.py b/hello.py
+--- a/hello.py
++++ b/hello.py
+@@ -1,3 +1,5 @@
+ line1
++new_a
++new_b
+ line2
+ line3
+";
+        let result = parse_unified_diff(diff, 5);
+        assert!(result.deleted_sections.is_empty());
     }
 }

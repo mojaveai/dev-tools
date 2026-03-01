@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::callgraph::{CallGraphStore, FunctionRelations};
 use crate::files;
 use crate::functions::{self, FunctionInfo};
-use crate::git::{self, DiffMode, GitDiffStore};
+use crate::git::{self, DeletedSection, DiffMode, GitDiffStore};
 use crate::highlighting::{Highlighter, ThemedHighlights};
 
 // Embed build artifacts at compile time
@@ -288,6 +288,7 @@ struct DiffResponse {
     mode: DiffMode,
     line_statuses: Vec<git::LineStatus>,
     deleted_before: Vec<usize>,
+    deleted_sections: Vec<DeletedSection>,
 }
 
 async fn api_diff(
@@ -314,6 +315,7 @@ async fn api_diff(
         mode: query.mode,
         line_statuses: diff.line_statuses,
         deleted_before: diff.deleted_before,
+        deleted_sections: diff.deleted_sections,
     }))
 }
 

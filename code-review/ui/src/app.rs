@@ -556,7 +556,15 @@ impl CodeReviewApp {
         self.scroll_offset_y = match &self.content {
             FileContent::Ready { functions, .. } => functions
                 .get(fn_index)
-                .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
+                .map(|f| {
+                    let focus = focus_range(functions, fn_index);
+                    let display_row = code_viewer::display_row_for_line(
+                        f.start_line,
+                        self.current_diff.as_ref(),
+                        focus.as_ref(),
+                    );
+                    display_row as f32 * code_viewer::ROW_HEIGHT
+                })
                 .unwrap_or(0.0),
             _ => 0.0,
         };
@@ -738,7 +746,7 @@ impl CodeReviewApp {
             AsyncData::Loaded(resp) => {
                 self.current_diff = Some(DiffData {
                     line_statuses: resp.line_statuses,
-                    deleted_before: resp.deleted_before,
+                    deleted_sections: resp.deleted_sections,
                 });
             }
             AsyncData::Error(_) => {
@@ -1295,12 +1303,19 @@ impl eframe::App for CodeReviewApp {
             let focus = focus_range(functions, last);
             *jobs = code_viewer::prepare(
                 highlights_for_theme(highlights, ctx.theme()),
-                focus,
+                focus.clone(),
                 theme::unfocused_code_for(ctx.theme()),
             );
             self.scroll_offset_y = functions
                 .get(last)
-                .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
+                .map(|f| {
+                    let row = code_viewer::display_row_for_line(
+                        f.start_line,
+                        self.current_diff.as_ref(),
+                        focus.as_ref(),
+                    );
+                    row as f32 * code_viewer::ROW_HEIGHT
+                })
                 .unwrap_or(0.0);
             self.scroll_generation += 1;
             self.refresh_focused_relations(ctx);
@@ -1320,6 +1335,10 @@ impl eframe::App for CodeReviewApp {
         let func_name = self.focused_function_name().map(String::from);
         let func_count = self.function_count();
         let focused_fn = self.focused_function;
+        let diff_focus = match &self.content {
+            FileContent::Ready { functions, .. } => focus_range(functions, self.focused_function),
+            _ => None,
+        };
         let is_git = self.is_git_repo == Some(true);
         let head_count = self.head_changed.len();
         let branch_count = self.branch_changed.len();
@@ -1530,7 +1549,12 @@ impl eframe::App for CodeReviewApp {
                     self.scroll_generation,
                     scroll_y,
                     func_name.as_deref(),
-                    self.current_diff.as_ref(),
+                    self.current_diff.as_ref().map(|data| {
+                        code_viewer::DiffOverlay {
+                            data,
+                            focus: diff_focus.clone(),
+                        }
+                    }),
                 );
             }
             (Some(_), FileContent::Error(err)) => {

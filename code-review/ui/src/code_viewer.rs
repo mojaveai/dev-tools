@@ -17,6 +17,77 @@ const GUTTER_WIDTH: f32 = 4.0;
 /// Horizontal padding between the gutter strip and the code text.
 const GUTTER_PAD: f32 = 6.0;
 
+/// A single display row — either a real code line or an inline deleted line.
+#[derive(Clone, Copy)]
+enum DisplayRow {
+    /// A line from the current file (index into the `jobs` slice).
+    Code(usize),
+    /// A deleted line from a diff section (section index, line within section).
+    Deleted(usize, usize),
+}
+
+/// Build the interleaved display row list.
+///
+/// When diff data is present, deleted lines are inserted before their
+/// corresponding code line — but only within the `focus` range.  Without
+/// diff data, rows map 1:1 to code lines.
+fn build_display_rows(
+    num_lines: usize,
+    diff: Option<&DiffData>,
+    focus: Option<&Range<usize>>,
+) -> Vec<DisplayRow> {
+    let Some(diff) = diff else {
+        return (0..num_lines).map(DisplayRow::Code).collect();
+    };
+
+    let in_focus = |line: usize| focus.is_none_or(|r| r.contains(&line));
+
+    let mut rows = Vec::with_capacity(num_lines + diff.deleted_sections.len() * 2);
+    for i in 0..num_lines {
+        // Insert any deleted lines that belong before this code line
+        if in_focus(i) {
+            for (si, section) in diff.deleted_sections.iter().enumerate() {
+                if section.before_line == i {
+                    for li in 0..section.lines.len() {
+                        rows.push(DisplayRow::Deleted(si, li));
+                    }
+                }
+            }
+        }
+        rows.push(DisplayRow::Code(i));
+    }
+    // Deletions at end of file (before_line == num_lines)
+    if in_focus(num_lines.saturating_sub(1)) {
+        for (si, section) in diff.deleted_sections.iter().enumerate() {
+            if section.before_line == num_lines {
+                for li in 0..section.lines.len() {
+                    rows.push(DisplayRow::Deleted(si, li));
+                }
+            }
+        }
+    }
+    rows
+}
+
+/// Compute the display-row index for a given code line, accounting for
+/// interleaved deleted lines within the `focus` range.  Used to convert
+/// code-line scroll targets into pixel offsets.
+pub fn display_row_for_line(
+    line: usize,
+    diff: Option<&DiffData>,
+    focus: Option<&Range<usize>>,
+) -> usize {
+    let Some(diff) = diff else { return line };
+    let in_focus = |l: usize| focus.is_none_or(|r| r.contains(&l));
+    let extra: usize = diff
+        .deleted_sections
+        .iter()
+        .filter(|s| s.before_line <= line && in_focus(s.before_line))
+        .map(|s| s.lines.len())
+        .sum();
+    line + extra
+}
+
 /// Pre-compute `LayoutJob`s from server-provided highlight spans.
 ///
 /// If `focus` is `Some(range)`, only lines within that range get full color;
@@ -42,15 +113,26 @@ pub fn prepare(
         .collect()
 }
 
-/// Render pre-computed layout jobs with virtual scrolling.
+/// Optional diff overlay for the code viewer.
+pub struct DiffOverlay<'a> {
+    pub data: &'a DiffData,
+    /// Restrict diff highlighting to this line range (the active function).
+    /// `None` highlights every changed line.
+    pub focus: Option<Range<usize>>,
+}
+
+/// Render pre-computed layout jobs with virtual scrolling and inline diffs.
 ///
 /// `scroll_y` is applied as the initial vertical offset when the scroll area
 /// is first created (after a `scroll_generation` bump). Pass `None` on
 /// subsequent frames to let the user scroll freely.
 ///
-/// If `diff` is provided, a colored gutter strip is painted to the left of
-/// each changed line (green = added, yellow = modified) and a thin red line
-/// marks positions where lines were deleted.
+/// When `diff` is present, deleted lines are shown inline with a red
+/// background, and changed code lines get colored gutter strips and
+/// subtle backgrounds (green = added, yellow = modified).  Diff
+/// highlighting is restricted to the overlay's `focus` range (the active
+/// function); pass `None` to highlight all lines.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     ui: &mut Ui,
     jobs: &[LayoutJob],
@@ -58,9 +140,15 @@ pub fn render(
     scroll_generation: u64,
     scroll_y: Option<f32>,
     function_label: Option<&str>,
-    diff: Option<&DiffData>,
+    diff: Option<DiffOverlay<'_>>,
 ) {
     let has_diff = diff.is_some();
+    let (diff_data, focus) = match &diff {
+        Some(ov) => (Some(ov.data), ov.focus.as_ref()),
+        None => (None, None),
+    };
+    let display_rows = build_display_rows(jobs.len(), diff_data, focus);
+    let total_rows = display_rows.len();
 
     ui.vertical(|ui| {
         // File path header, optionally with focused function name
@@ -86,7 +174,6 @@ pub fn render(
         ui.add_space(4.0);
 
         // Zero out vertical item spacing so ROW_HEIGHT is the exact row stride.
-        // This keeps scroll offset calculations (start_line * ROW_HEIGHT) accurate.
         ui.spacing_mut().item_spacing.y = 0.0;
 
         // Reserve left padding for the gutter when diff data is present.
@@ -102,53 +189,110 @@ pub fn render(
             area = area.scroll_offset(egui::vec2(0.0, y));
         }
 
-        area.show_rows(ui, ROW_HEIGHT, jobs.len(), |ui, visible_range| {
-            // Capture gutter colors once per frame (avoids per-row lookups)
-            let added_color = theme::diff_added(ui);
-            let modified_color = theme::diff_modified(ui);
-            let deleted_color = theme::diff_deleted(ui);
+        let code_font = FontId::monospace(13.0);
+
+        area.show_rows(ui, ROW_HEIGHT, total_rows, |ui, visible_range| {
+            // Capture colors once per frame
+            let added_gutter = theme::diff_added(ui);
+            let deleted_gutter = theme::diff_deleted(ui);
+            let added_bg = theme::diff_added_bg(ui);
+            let deleted_bg = theme::diff_deleted_bg(ui);
+            let deleted_text = theme::diff_deleted(ui);
 
             for i in visible_range {
-                let response = ui.label(jobs[i].clone());
+                let row_top = ui.cursor().min.y;
+                let content_x = ui.cursor().min.x;
 
-                if let Some(diff) = diff {
-                    let row_rect = response.rect;
+                match display_rows[i] {
+                    DisplayRow::Code(line_idx) => {
+                        // Paint diff background and gutter BEFORE the text
+                        // so the source remains visible on top.
+                        // Only highlight lines within the focused function.
+                        let in_focus = focus.is_none_or(|r| r.contains(&line_idx));
+                        if in_focus
+                            && let Some(diff) = diff_data
+                            && let Some(status) = diff.line_statuses.get(line_idx)
+                        {
+                            let (gutter_color, bg_color) = match status {
+                                LineStatus::Added | LineStatus::Modified => {
+                                    (Some(added_gutter), Some(added_bg))
+                                }
+                                LineStatus::Unchanged => (None, None),
+                            };
 
-                    // Paint gutter strip for added/modified lines
-                    if let Some(status) = diff.line_statuses.get(i) {
-                        let color = match status {
-                            LineStatus::Added => Some(added_color),
-                            LineStatus::Modified => Some(modified_color),
-                            LineStatus::Unchanged => None,
-                        };
-                        if let Some(color) = color {
-                            let gutter_rect = Rect::from_min_size(
-                                egui::pos2(
-                                    row_rect.min.x - GUTTER_PAD - GUTTER_WIDTH,
-                                    row_rect.min.y,
-                                ),
-                                Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
-                            );
-                            ui.painter().rect_filled(
-                                gutter_rect,
-                                egui::CornerRadius::ZERO,
-                                color,
-                            );
+                            // Full-width row background for changed lines
+                            if let Some(bg) = bg_color {
+                                let bg_rect = Rect::from_min_max(
+                                    egui::pos2(ui.clip_rect().min.x, row_top),
+                                    egui::pos2(ui.clip_rect().max.x, row_top + ROW_HEIGHT),
+                                );
+                                ui.painter().rect_filled(
+                                    bg_rect,
+                                    egui::CornerRadius::ZERO,
+                                    bg,
+                                );
+                            }
+
+                            // Gutter strip
+                            if let Some(color) = gutter_color {
+                                let gutter_rect = Rect::from_min_size(
+                                    egui::pos2(
+                                        content_x - GUTTER_PAD - GUTTER_WIDTH,
+                                        row_top,
+                                    ),
+                                    Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
+                                );
+                                ui.painter().rect_filled(
+                                    gutter_rect,
+                                    egui::CornerRadius::ZERO,
+                                    color,
+                                );
+                            }
                         }
-                    }
 
-                    // Paint thin red line where deletions occurred
-                    if diff.deleted_before.contains(&i) {
-                        let y = row_rect.min.y;
-                        let line_rect = Rect::from_min_size(
-                            egui::pos2(row_rect.min.x - GUTTER_PAD - GUTTER_WIDTH, y - 1.0),
-                            Vec2::new(row_rect.width() + GUTTER_PAD + GUTTER_WIDTH, 2.0),
+                        // Draw text on top of the background
+                        ui.label(jobs[line_idx].clone());
+                    }
+                    DisplayRow::Deleted(section_idx, line_idx) => {
+                        let diff = diff_data.expect("Deleted rows only exist with diff data");
+                        let text = &diff.deleted_sections[section_idx].lines[line_idx];
+
+                        // Full-width deleted background (painted first)
+                        let bg_rect = Rect::from_min_max(
+                            egui::pos2(ui.clip_rect().min.x, row_top),
+                            egui::pos2(ui.clip_rect().max.x, row_top + ROW_HEIGHT),
+                        );
+                        ui.painter()
+                            .rect_filled(bg_rect, egui::CornerRadius::ZERO, deleted_bg);
+
+                        // Red gutter strip
+                        let gutter_rect = Rect::from_min_size(
+                            egui::pos2(
+                                content_x - GUTTER_PAD - GUTTER_WIDTH,
+                                row_top,
+                            ),
+                            Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
                         );
                         ui.painter().rect_filled(
-                            line_rect,
+                            gutter_rect,
                             egui::CornerRadius::ZERO,
-                            deleted_color,
+                            deleted_gutter,
                         );
+
+                        // Draw deleted text on top
+                        let mut job = LayoutJob::default();
+                        let display_text = if text.is_empty() { " " } else { text };
+                        job.append(
+                            display_text,
+                            0.0,
+                            TextFormat {
+                                font_id: code_font.clone(),
+                                color: deleted_text,
+                                strikethrough: egui::Stroke::new(1.0, deleted_text),
+                                ..Default::default()
+                            },
+                        );
+                        ui.label(job);
                     }
                 }
             }
