@@ -5,7 +5,10 @@ use egui::{CentralPanel, Key, SidePanel, TopBottomPanel, RichText};
 use egui::text::LayoutJob;
 
 use crate::perf::FrameStats;
-use crate::state::{AsyncData, FileNode, HighlightedLines, SharedAsync, collect_paths, shared_loading};
+use crate::state::{
+    AsyncData, FileNode, FilesResponse, HighlightedLines, SharedAsync, collect_paths,
+    shared_loading,
+};
 use crate::{code_viewer, file_browser, theme};
 
 /// Response shape for GET /api/file
@@ -29,7 +32,8 @@ enum FileContent {
 }
 
 pub struct CodeReviewApp {
-    file_list: SharedAsync<Vec<String>>,
+    /// In-flight file list fetch — polled each frame.
+    pending_file_list: Option<SharedAsync<FilesResponse>>,
     file_tree: Vec<FileNode>,
     /// Flat file paths in tree-display order, for sequential navigation.
     flat_paths: Vec<String>,
@@ -41,12 +45,18 @@ pub struct CodeReviewApp {
     theme_applied: bool,
     frame_stats: FrameStats,
     zen_mode: bool,
+    /// Number of file paths we last built the tree from.
+    known_file_count: usize,
+    /// Whether the server has finished scanning.
+    scan_complete: bool,
+    /// egui time at which to fire the next file-list poll.
+    poll_files_after: Option<f64>,
 }
 
 impl CodeReviewApp {
     pub fn new() -> Self {
         Self {
-            file_list: shared_loading(),
+            pending_file_list: None,
             file_tree: Vec::new(),
             flat_paths: Vec::new(),
             selected_path: None,
@@ -55,24 +65,28 @@ impl CodeReviewApp {
             theme_applied: false,
             frame_stats: FrameStats::new(),
             zen_mode: true,
+            known_file_count: 0,
+            scan_complete: false,
+            poll_files_after: None,
         }
     }
 
-    /// Kick off the initial file list fetch.
-    pub fn fetch_file_list(&self, ctx: &egui::Context) {
-        let data = Arc::clone(&self.file_list);
+    /// Kick off a file-list fetch (initial or follow-up poll).
+    pub fn fetch_file_list(&mut self, ctx: &egui::Context) {
+        let shared: SharedAsync<FilesResponse> = shared_loading();
+        self.pending_file_list = Some(Arc::clone(&shared));
         let ctx = ctx.clone();
 
         ehttp::fetch(ehttp::Request::get("/api/files"), move |result| {
             let value = match result {
                 Ok(response) => {
-                    serde_json::from_slice::<Vec<String>>(&response.bytes)
+                    serde_json::from_slice::<FilesResponse>(&response.bytes)
                         .map(AsyncData::Loaded)
                         .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
                 }
                 Err(err) => AsyncData::Error(err),
             };
-            *data.lock().unwrap() = value;
+            *shared.lock().unwrap() = value;
             ctx.request_repaint();
         });
     }
@@ -122,15 +136,57 @@ impl CodeReviewApp {
         self.pending_content = None;
     }
 
-    fn update_tree_if_needed(&mut self) {
-        let data = self.file_list.lock().unwrap();
-        if let AsyncData::Loaded(paths) = &*data
-            && self.file_tree.is_empty()
-            && !paths.is_empty()
-        {
-            self.file_tree = FileNode::build_tree(paths);
-            self.flat_paths = collect_paths(&self.file_tree);
+    /// Check if the in-flight file-list fetch has completed. When new files
+    /// arrive, rebuild the tree and schedule the next poll if still scanning.
+    fn poll_file_list(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_file_list.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+
+        if matches!(*guard, AsyncData::Loading) {
+            return;
         }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                drop(guard);
+                self.pending_file_list = None;
+
+                let new_count = resp.files.len();
+                if new_count != self.known_file_count {
+                    let auto_open = self.known_file_count == 0 && new_count > 0;
+                    self.known_file_count = new_count;
+                    self.file_tree = FileNode::build_tree(&resp.files);
+                    self.flat_paths = collect_paths(&self.file_tree);
+
+                    if auto_open {
+                        self.navigate_to(0, ctx);
+                    }
+                }
+
+                if resp.scanning {
+                    self.schedule_file_poll(ctx);
+                } else {
+                    self.scan_complete = true;
+                }
+            }
+            AsyncData::Error(_err) => {
+                self.pending_file_list = None;
+                // Retry after a short delay even on error.
+                if !self.scan_complete {
+                    self.schedule_file_poll(ctx);
+                }
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+    }
+
+    /// Schedule the next file-list poll 500 ms from now.
+    fn schedule_file_poll(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        self.poll_files_after = Some(now + 0.5);
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 
     /// Index of the currently selected file in the flat path list.
@@ -173,7 +229,15 @@ impl eframe::App for CodeReviewApp {
             self.theme_applied = true;
         }
 
-        self.update_tree_if_needed();
+        // Fire a follow-up file-list poll if the timer has elapsed.
+        if let Some(t) = self.poll_files_after
+            && ctx.input(|i| i.time) >= t
+        {
+            self.poll_files_after = None;
+            self.fetch_file_list(ctx);
+        }
+
+        self.poll_file_list(ctx);
         self.poll_pending_content();
 
         // Arrow key navigation (works in both modes)
@@ -207,6 +271,9 @@ impl eframe::App for CodeReviewApp {
                         .color(theme::text_muted())
                         .size(12.0),
                 );
+                if !self.scan_complete {
+                    ui.spinner();
+                }
 
                 // Right-align the zen mode toggle
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -236,31 +303,18 @@ impl eframe::App for CodeReviewApp {
                     ui.separator();
                     ui.add_space(4.0);
 
-                    let data = self.file_list.lock().unwrap();
-                    match &*data {
-                        AsyncData::Loading => {
-                            ui.spinner();
-                            ui.label("Loading files...");
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if let Some(path) = file_browser::render(
+                            ui,
+                            &self.file_tree,
+                            self.selected_path.as_deref(),
+                        )
+                            && self.selected_path.as_deref() != Some(path.as_str())
+                        {
+                            self.selected_path = Some(path.clone());
+                            self.fetch_file_content(&path, ctx);
                         }
-                        AsyncData::Error(err) => {
-                            ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
-                        }
-                        AsyncData::Loaded(_) => {
-                            drop(data); // release lock before rendering tree
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                if let Some(path) = file_browser::render(
-                                    ui,
-                                    &self.file_tree,
-                                    self.selected_path.as_deref(),
-                                )
-                                    && self.selected_path.as_deref() != Some(path.as_str())
-                                {
-                                    self.selected_path = Some(path.clone());
-                                    self.fetch_file_content(&path, ctx);
-                                }
-                            });
-                        }
-                    }
+                    });
                 });
         }
 
@@ -273,19 +327,19 @@ impl eframe::App for CodeReviewApp {
                     let at_end = current_pos.is_some_and(|i| i + 1 >= file_count);
 
                     if ui.add_enabled(!at_start, egui::Button::new(
-                        RichText::new("\u{2190} Prev").size(13.0),
+                        RichText::new("\u{2B05} Prev").size(13.0),
                     )).clicked() {
                         self.navigate_prev(ctx);
                     }
 
                     if ui.add_enabled(!at_end, egui::Button::new(
-                        RichText::new("Next \u{2192}").size(13.0),
+                        RichText::new("Next \u{27A1}").size(13.0),
                     )).clicked() {
                         self.navigate_next(ctx);
                     }
 
                     ui.label(
-                        RichText::new("\u{2190}\u{2192} arrow keys")
+                        RichText::new("\u{2B05}\u{27A1} arrow keys")
                             .size(11.0)
                             .color(theme::text_muted()),
                     );

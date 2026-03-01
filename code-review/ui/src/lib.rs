@@ -44,7 +44,7 @@ impl WebHandle {
                 canvas,
                 eframe::WebOptions::default(),
                 Box::new(|cc| {
-                    let app = app::CodeReviewApp::new();
+                    let mut app = app::CodeReviewApp::new();
                     app.fetch_file_list(&cc.egui_ctx);
                     Ok(Box::new(app))
                 }),

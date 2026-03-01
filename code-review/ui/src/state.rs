@@ -85,6 +85,13 @@ fn insert_path(nodes: &mut Vec<FileNode>, full_path: &str, parts: &[&str]) {
     }
 }
 
+/// Response shape for GET /api/files — includes scanning progress.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct FilesResponse {
+    pub files: Vec<String>,
+    pub scanning: bool,
+}
+
 /// A single styled text fragment from server-side syntax highlighting.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct StyledSpan {

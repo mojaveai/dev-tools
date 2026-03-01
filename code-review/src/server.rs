@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -20,7 +21,8 @@ const WASM_BG: &[u8] = include_bytes!(env!("WASM_BG_PATH"));
 #[derive(Clone)]
 pub struct AppState {
     pub root: PathBuf,
-    pub file_paths: Arc<Vec<String>>,
+    pub file_paths: Arc<RwLock<Vec<String>>>,
+    pub scan_complete: Arc<AtomicBool>,
     pub highlighter: Arc<Highlighter>,
 }
 
@@ -64,8 +66,16 @@ async fn serve_wasm() -> Response {
         .into_response()
 }
 
+#[derive(serde::Serialize)]
+struct FilesResponse {
+    files: Vec<String>,
+    scanning: bool,
+}
+
 async fn api_files(State(state): State<AppState>) -> impl IntoResponse {
-    axum::Json(state.file_paths.as_ref().clone())
+    let files = state.file_paths.read().unwrap().clone();
+    let scanning = !state.scan_complete.load(Ordering::Acquire);
+    axum::Json(FilesResponse { files, scanning })
 }
 
 #[derive(Deserialize)]

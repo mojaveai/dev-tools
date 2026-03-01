@@ -76,7 +76,7 @@ fn build_layout_job(spans: &[StyledSpan], code_font: &FontId) -> LayoutJob {
 /// Render the empty state when no file is selected.
 pub fn render_empty(ui: &mut Ui, zen_mode: bool) {
     let msg = if zen_mode {
-        "Press \u{2192} or click Next to start reviewing"
+        "Press \u{27A1} or click Next to start reviewing"
     } else {
         "Select a file to view"
     };

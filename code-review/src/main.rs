@@ -3,7 +3,8 @@ mod highlighting;
 mod server;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, RwLock};
 
 use tracing::{info, warn};
 
@@ -23,17 +24,23 @@ async fn main() {
         .canonicalize()
         .expect("Cannot canonicalize root path");
 
-    info!("Indexing Python files in {}", root.display());
-    let file_paths = files::discover_python_files(&root);
-    info!("Found {} Python files", file_paths.len());
-
     let highlighter = highlighting::Highlighter::new();
 
+    let file_paths: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+    let scan_complete = Arc::new(AtomicBool::new(false));
+
     let state = server::AppState {
-        root,
-        file_paths: Arc::new(file_paths),
+        root: root.clone(),
+        file_paths: Arc::clone(&file_paths),
+        scan_complete: Arc::clone(&scan_complete),
         highlighter: Arc::new(highlighter),
     };
+
+    // Discover files in the background — server starts serving immediately.
+    info!("Scanning Python files in {}", root.display());
+    tokio::task::spawn_blocking(move || {
+        files::discover_python_files_incremental(root, file_paths, scan_complete);
+    });
 
     let app = server::router(state);
     let (listener, port) = bind_available_port(DEFAULT_PORT).await;

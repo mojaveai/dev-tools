@@ -1,35 +1,40 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use ignore::WalkBuilder;
 
-/// Discover Python files under `root`, respecting .gitignore rules.
-/// Returns sorted relative paths.
-pub fn discover_python_files(root: &Path) -> Vec<String> {
-    WalkBuilder::new(root)
+/// Incrementally discover Python files under `root`, pushing each path into
+/// `sink` as it is found. Sets `done` to `true` when the walk finishes.
+/// Designed to run on a blocking thread via `tokio::task::spawn_blocking`.
+pub fn discover_python_files_incremental(
+    root: PathBuf,
+    sink: Arc<RwLock<Vec<String>>>,
+    done: Arc<AtomicBool>,
+) {
+    let walker = WalkBuilder::new(&root)
         .hidden(true)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
-        .build()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "py")
-        })
-        .filter_map(|entry| {
-            entry
-                .path()
-                .strip_prefix(root)
-                .ok()
-                .map(Path::to_path_buf)
-        })
-        .map(|p| normalize_path(&p))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
+        .sort_by_file_path(Path::cmp)
+        .build();
+
+    for entry in walker.filter_map(Result::ok) {
+        let dominated_by_py = entry.file_type().is_some_and(|ft| ft.is_file())
+            && entry.path().extension().is_some_and(|ext| ext == "py");
+
+        if !dominated_by_py {
+            continue;
+        }
+
+        if let Ok(rel) = entry.path().strip_prefix(&root) {
+            let path = normalize_path(rel);
+            sink.write().unwrap().push(path);
+        }
+    }
+
+    done.store(true, Ordering::Release);
 }
 
 /// Validate a user-supplied relative path against traversal attacks.
