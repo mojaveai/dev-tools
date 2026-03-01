@@ -58,12 +58,17 @@ impl Highlighter {
         content
             .lines()
             .map(|line| {
+                // Grammars loaded with `load_defaults_newlines` expect each line
+                // to end with '\n' so end-of-line anchors fire correctly.
+                // Without this, single-line scopes (e.g. Python `#` comments)
+                // never close and bleed into subsequent lines.
+                let terminated = format!("{line}\n");
                 highlighter
-                    .highlight_line(line, &self.syntax_set)
+                    .highlight_line(&terminated, &self.syntax_set)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|(style, text)| StyledSpan {
-                        text: text.to_owned(),
+                        text: text.trim_end_matches('\n').to_owned(),
                         r: style.foreground.r,
                         g: style.foreground.g,
                         b: style.foreground.b,

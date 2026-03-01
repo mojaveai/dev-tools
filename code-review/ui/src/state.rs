@@ -8,15 +8,6 @@ pub enum AsyncData<T> {
     Error(String),
 }
 
-impl<T> AsyncData<T> {
-    pub fn as_loaded(&self) -> Option<&T> {
-        match self {
-            Self::Loaded(v) => Some(v),
-            _ => None,
-        }
-    }
-}
-
 /// Thread-safe handle for async data that bridges ehttp callbacks to egui's immediate-mode loop.
 pub type SharedAsync<T> = Arc<Mutex<AsyncData<T>>>;
 
