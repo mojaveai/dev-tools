@@ -11,7 +11,7 @@ pub fn render(ui: &mut Ui, nodes: &[FileNode], selected: Option<&str>) -> Option
             FileNode::Dir { name, children } => {
                 let header = CollapsingHeader::new(
                     RichText::new(format!("\u{1F4C1} {name}"))
-                        .color(theme::text_primary())
+                        .color(theme::text_primary(ui))
                         .size(13.5),
                 )
                 .default_open(false);
@@ -26,9 +26,9 @@ pub fn render(ui: &mut Ui, nodes: &[FileNode], selected: Option<&str>) -> Option
                 let is_selected = selected == Some(path.as_str());
                 let label = RichText::new(format!("\u{1F4C4} {name}"))
                     .color(if is_selected {
-                        theme::accent()
+                        theme::accent(ui)
                     } else {
-                        theme::text_primary()
+                        theme::text_primary(ui)
                     })
                     .size(13.5);
 

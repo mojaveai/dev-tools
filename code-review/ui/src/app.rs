@@ -7,7 +7,8 @@ use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 use crate::perf::FrameStats;
 use crate::state::{
     AsyncData, CallTreeNode, FileNode, FilePayload, FilesResponse, FunctionInfo, FunctionRef,
-    FunctionRelations, HighlightedLines, SharedAsync, collect_paths, shared_loading,
+    FunctionRelations, HighlightedLines, SharedAsync, ThemedHighlights, collect_paths,
+    shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -18,7 +19,7 @@ struct FileResponse {
     path: String,
     #[allow(dead_code)]
     content: String,
-    highlights: HighlightedLines,
+    highlights: ThemedHighlights,
     functions: Vec<FunctionInfo>,
 }
 
@@ -29,8 +30,8 @@ enum FileContent {
     /// Pre-computed layout jobs, ready to render.
     Ready {
         jobs: Vec<LayoutJob>,
-        /// Original spans retained for re-preparing when focus changes.
-        spans: HighlightedLines,
+        /// Original spans for light/dark themes, retained for theme/focus refreshes.
+        highlights: ThemedHighlights,
         /// Function definitions in this file.
         functions: Vec<FunctionInfo>,
     },
@@ -60,6 +61,7 @@ pub struct CodeReviewApp {
     /// Resolved caller/callee info for the focused function.
     relations: FunctionRelationsState,
     theme_applied: bool,
+    last_theme: Option<egui::Theme>,
     frame_stats: FrameStats,
     zen_mode: bool,
     /// Number of file paths we last built the tree from.
@@ -90,6 +92,7 @@ impl CodeReviewApp {
             pending_relations: None,
             relations: FunctionRelationsState::Empty,
             theme_applied: false,
+            last_theme: None,
             frame_stats: FrameStats::new(),
             zen_mode: true,
             known_file_count: 0,
@@ -187,10 +190,14 @@ impl CodeReviewApp {
                 drop(guard);
                 self.focused_function = 0;
                 let focus = focus_range(&payload.functions, 0);
-                let jobs = code_viewer::prepare(&payload.highlights, focus);
+                let jobs = code_viewer::prepare(
+                    highlights_for_theme(&payload.highlights, ctx.theme()),
+                    focus,
+                    theme::unfocused_code_for(ctx.theme()),
+                );
                 self.content = FileContent::Ready {
                     jobs,
-                    spans: payload.highlights,
+                    highlights: payload.highlights,
                     functions: payload.functions,
                 };
                 self.apply_function_scroll(0);
@@ -227,6 +234,22 @@ impl CodeReviewApp {
             AsyncData::Loading => unreachable!(),
         }
         self.pending_relations = None;
+    }
+
+    fn reprepare_code_for_theme(&mut self, active_theme: egui::Theme) {
+        if let FileContent::Ready {
+            jobs,
+            highlights,
+            functions,
+        } = &mut self.content
+        {
+            let focus = focus_range(functions, self.focused_function);
+            *jobs = code_viewer::prepare(
+                highlights_for_theme(highlights, active_theme),
+                focus,
+                theme::unfocused_code_for(active_theme),
+            );
+        }
     }
 
     /// Start caller/callee fetch for the currently focused function.
@@ -359,7 +382,7 @@ impl CodeReviewApp {
     fn try_focus_function(&mut self, index: usize, ctx: &egui::Context) -> bool {
         let FileContent::Ready {
             jobs,
-            spans,
+            highlights,
             functions,
         } = &mut self.content
         else {
@@ -372,7 +395,11 @@ impl CodeReviewApp {
 
         self.focused_function = index;
         let focus = focus_range(functions, index);
-        *jobs = code_viewer::prepare(spans, focus);
+        *jobs = code_viewer::prepare(
+            highlights_for_theme(highlights, ctx.theme()),
+            focus,
+            theme::unfocused_code_for(ctx.theme()),
+        );
         self.apply_function_scroll(index);
         self.refresh_focused_relations(ctx);
         true
@@ -435,7 +462,7 @@ impl CodeReviewApp {
             RichText::new("Call Graph")
                 .strong()
                 .size(14.0)
-                .color(theme::text_primary()),
+                .color(theme::text_primary(ui)),
         );
         ui.add_space(4.0);
         ui.separator();
@@ -453,7 +480,7 @@ impl CodeReviewApp {
             ui.label(
                 RichText::new("No focused function")
                     .size(12.0)
-                    .color(theme::text_muted()),
+                    .color(theme::text_muted(ui)),
             );
             return;
         };
@@ -467,7 +494,7 @@ impl CodeReviewApp {
                 ui.label(
                     RichText::new("Resolving callers/callees...")
                         .size(12.0)
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
             });
             return;
@@ -502,7 +529,7 @@ impl CodeReviewApp {
                 ui.label(
                     RichText::new("No relationship data yet")
                         .size(12.0)
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
             }
         }
@@ -510,8 +537,8 @@ impl CodeReviewApp {
 
     fn render_function_title(&self, ui: &mut egui::Ui, function: &FunctionRef) {
         egui::Frame {
-            fill: egui::Color32::from_rgb(0xEF, 0xF3, 0xF7),
-            stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(0xD7, 0xDF, 0xE7)),
+            fill: theme::focus_fill(ui),
+            stroke: egui::Stroke::new(1.0, theme::focus_stroke(ui)),
             corner_radius: egui::CornerRadius::same(6),
             inner_margin: egui::Margin::symmetric(8, 6),
             ..Default::default()
@@ -522,20 +549,20 @@ impl CodeReviewApp {
                     RichText::new("FOCUS")
                         .size(9.5)
                         .monospace()
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
                 ui.label(
                     RichText::new(function.name.as_str())
                         .size(13.0)
                         .strong()
-                        .color(theme::text_primary()),
+                        .color(theme::text_primary(ui)),
                 );
             });
             ui.label(
                 RichText::new(format!("{}:{}", function.path, function.start_line + 1))
                     .size(10.5)
                     .monospace()
-                    .color(theme::text_muted()),
+                    .color(theme::text_muted(ui)),
             );
         });
     }
@@ -548,16 +575,8 @@ impl CodeReviewApp {
         cycle: bool,
         is_test: bool,
     ) {
-        let fill = match depth % 3 {
-            0 => egui::Color32::from_rgb(0xFA, 0xFA, 0xF8),
-            1 => egui::Color32::from_rgb(0xF6, 0xF6, 0xF3),
-            _ => egui::Color32::from_rgb(0xF2, 0xF2, 0xEF),
-        };
-        let border = if cycle {
-            theme::accent()
-        } else {
-            egui::Color32::from_rgb(0xDF, 0xDF, 0xD9)
-        };
+        let fill = theme::entry_fill(ui, depth);
+        let border = theme::entry_stroke(ui, cycle);
 
         egui::Frame {
             fill,
@@ -572,7 +591,7 @@ impl CodeReviewApp {
                     RichText::new(function.name.as_str())
                         .size(12.0)
                         .strong()
-                        .color(theme::text_primary()),
+                        .color(theme::text_primary(ui)),
                 );
 
                 if is_test {
@@ -580,8 +599,8 @@ impl CodeReviewApp {
                         RichText::new("TEST")
                             .size(9.5)
                             .monospace()
-                            .background_color(egui::Color32::from_rgb(0xE6, 0xF3, 0xEC))
-                            .color(egui::Color32::from_rgb(0x2E, 0x6A, 0x45)),
+                            .background_color(theme::test_badge_bg(ui))
+                            .color(theme::test_badge_fg(ui)),
                     );
                 }
 
@@ -590,8 +609,8 @@ impl CodeReviewApp {
                         RichText::new("CYCLE")
                             .size(9.5)
                             .monospace()
-                            .background_color(egui::Color32::from_rgb(0xF6, 0xE8, 0xE3))
-                            .color(theme::accent()),
+                            .background_color(theme::cycle_badge_bg(ui))
+                            .color(theme::accent(ui)),
                     );
                 }
             });
@@ -600,7 +619,7 @@ impl CodeReviewApp {
                 RichText::new(format!("{}:{}", function.path, function.start_line + 1))
                     .size(10.5)
                     .monospace()
-                    .color(theme::text_muted()),
+                    .color(theme::text_muted(ui)),
             );
         });
     }
@@ -618,7 +637,7 @@ impl CodeReviewApp {
             RichText::new(format!("{title} ({})", items.len()))
                 .size(12.0)
                 .strong()
-                .color(theme::text_primary()),
+                .color(theme::text_primary(ui)),
         )
         .id_salt(("call-tree-section", id_prefix))
         .default_open(false)
@@ -627,12 +646,12 @@ impl CodeReviewApp {
                 ui.label(
                     RichText::new(empty_msg)
                         .size(11.0)
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
                 return;
             }
 
-            ui.label(RichText::new(hint).size(10.5).color(theme::text_muted()));
+            ui.label(RichText::new(hint).size(10.5).color(theme::text_muted(ui)));
             ui.add_space(4.0);
             self.render_tree_nodes(ui, items, id_prefix, 0);
         });
@@ -643,7 +662,7 @@ impl CodeReviewApp {
             RichText::new(format!("Tests ({})", items.len()))
                 .size(12.0)
                 .strong()
-                .color(theme::text_primary()),
+                .color(theme::text_primary(ui)),
         )
         .id_salt("call-tree-tests")
         .default_open(false)
@@ -652,7 +671,7 @@ impl CodeReviewApp {
                 ui.label(
                     RichText::new("No tests exercise this function")
                         .size(11.0)
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
                 return;
             }
@@ -660,7 +679,7 @@ impl CodeReviewApp {
             ui.label(
                 RichText::new("Includes direct and indirect test callers")
                     .size(10.5)
-                    .color(theme::text_muted()),
+                    .color(theme::text_muted(ui)),
             );
             ui.add_space(4.0);
             items.iter().for_each(|item| {
@@ -708,7 +727,7 @@ impl CodeReviewApp {
                     RichText::new("... more nodes omitted")
                         .size(10.0)
                         .monospace()
-                        .color(theme::text_muted()),
+                        .color(theme::text_muted(ui)),
                 );
             }
             return;
@@ -727,7 +746,7 @@ impl CodeReviewApp {
                             RichText::new("... more nodes omitted")
                                 .size(10.0)
                                 .monospace()
-                                .color(theme::text_muted()),
+                                .color(theme::text_muted(ui)),
                         );
                     }
                 });
@@ -739,6 +758,13 @@ fn focus_range(functions: &[FunctionInfo], index: usize) -> Option<std::ops::Ran
     functions.get(index).map(|f| f.start_line..f.end_line)
 }
 
+fn highlights_for_theme(highlights: &ThemedHighlights, theme: egui::Theme) -> &HighlightedLines {
+    match theme {
+        egui::Theme::Dark => &highlights.dark,
+        egui::Theme::Light => &highlights.light,
+    }
+}
+
 impl eframe::App for CodeReviewApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         let t0 = self.frame_stats.begin();
@@ -746,6 +772,7 @@ impl eframe::App for CodeReviewApp {
         if !self.theme_applied {
             theme::apply(ctx);
             self.theme_applied = true;
+            self.last_theme = Some(ctx.theme());
         }
 
         // Fire a follow-up file-list poll if the timer has elapsed.
@@ -764,14 +791,18 @@ impl eframe::App for CodeReviewApp {
         if self.focused_function == usize::MAX
             && let FileContent::Ready {
                 jobs,
-                spans,
+                highlights,
                 functions,
             } = &mut self.content
         {
             let last = functions.len().saturating_sub(1);
             self.focused_function = last;
             let focus = focus_range(functions, last);
-            *jobs = code_viewer::prepare(spans, focus);
+            *jobs = code_viewer::prepare(
+                highlights_for_theme(highlights, ctx.theme()),
+                focus,
+                theme::unfocused_code_for(ctx.theme()),
+            );
             self.scroll_offset_y = functions
                 .get(last)
                 .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
@@ -802,7 +833,7 @@ impl eframe::App for CodeReviewApp {
                     RichText::new("Code Review")
                         .strong()
                         .size(16.0)
-                        .color(theme::text_primary()),
+                        .color(theme::text_primary(ui)),
                 );
                 ui.separator();
                 let count_label = current_pos.map_or_else(
@@ -811,7 +842,7 @@ impl eframe::App for CodeReviewApp {
                 );
                 ui.label(
                     RichText::new(count_label)
-                        .color(theme::text_muted())
+                        .color(theme::text_muted(ui))
                         .size(12.0),
                 );
 
@@ -820,7 +851,7 @@ impl eframe::App for CodeReviewApp {
                     ui.separator();
                     ui.label(
                         RichText::new(format!("{name}  ({} / {func_count})", focused_fn + 1))
-                            .color(theme::accent())
+                            .color(theme::accent(ui))
                             .size(12.0)
                             .strong(),
                     );
@@ -836,12 +867,39 @@ impl eframe::App for CodeReviewApp {
                         &mut self.zen_mode,
                         RichText::new("Zen Mode")
                             .size(12.0)
-                            .color(theme::text_muted()),
+                            .color(theme::text_muted(ui)),
                     );
+
+                    let mut theme_preference = ui.ctx().options(|opt| opt.theme_preference);
+                    ui.label(
+                        RichText::new("Theme")
+                            .size(12.0)
+                            .color(theme::text_muted(ui)),
+                    );
+                    ui.selectable_value(
+                        &mut theme_preference,
+                        egui::ThemePreference::System,
+                        "System",
+                    );
+                    ui.selectable_value(&mut theme_preference, egui::ThemePreference::Dark, "Dark");
+                    ui.selectable_value(
+                        &mut theme_preference,
+                        egui::ThemePreference::Light,
+                        "Light",
+                    );
+                    if theme_preference != ui.ctx().options(|opt| opt.theme_preference) {
+                        ui.ctx().set_theme(theme_preference);
+                    }
                 });
             });
             ui.add_space(4.0);
         });
+
+        let active_theme = ctx.theme();
+        if self.last_theme != Some(active_theme) {
+            self.reprepare_code_for_theme(active_theme);
+            self.last_theme = Some(active_theme);
+        }
 
         // Left panel: file browser (hidden in zen mode)
         if !self.zen_mode {
@@ -854,7 +912,7 @@ impl eframe::App for CodeReviewApp {
                         RichText::new("Files")
                             .strong()
                             .size(14.0)
-                            .color(theme::text_primary()),
+                            .color(theme::text_primary(ui)),
                     );
                     ui.add_space(4.0);
                     ui.separator();
@@ -916,7 +974,7 @@ impl eframe::App for CodeReviewApp {
                     ui.label(
                         RichText::new("\u{2B05}\u{27A1} arrow keys")
                             .size(11.0)
-                            .color(theme::text_muted()),
+                            .color(theme::text_muted(ui)),
                     );
                 });
                 ui.add_space(4.0);

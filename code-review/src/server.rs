@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::callgraph::{CallGraphStore, FunctionRelations};
 use crate::files;
 use crate::functions::{self, FunctionInfo};
-use crate::highlighting::{Highlighter, StyledSpan};
+use crate::highlighting::{Highlighter, ThemedHighlights};
 
 // Embed build artifacts at compile time
 const INDEX_HTML: &[u8] = include_bytes!("../assets/index.html");
@@ -91,7 +91,7 @@ struct FileQuery {
 struct FileResponse {
     path: String,
     content: String,
-    highlights: Vec<Vec<StyledSpan>>,
+    highlights: ThemedHighlights,
     functions: Vec<FunctionInfo>,
 }
 

@@ -16,6 +16,9 @@ Key reference notes for developing with egui 0.33 / eframe 0.33.
 - Widget styles live in `Visuals::widgets` with states: `noninteractive`, `inactive`, `hovered`, `active`, `open`
 - `WidgetVisuals` fields: `bg_fill`, `weak_bg_fill`, `bg_stroke`, `corner_radius`, `fg_stroke`, `expansion`
 - `Margin::same(12)` takes an `i8` value
+- Use `ctx.set_visuals_of(Theme::Light, ...)` and `ctx.set_visuals_of(Theme::Dark, ...)` to install both theme palettes once
+- `ctx.set_theme(ThemePreference::System)` makes the app follow OS/browser dark/light preference by default
+- `ctx.theme()` returns the currently effective theme (after applying system preference and user override)
 
 ## Async Data Pattern
 

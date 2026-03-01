@@ -95,6 +95,13 @@ pub struct StyledSpan {
 /// All highlighted lines for a file.
 pub type HighlightedLines = Vec<Vec<StyledSpan>>;
 
+/// Syntax-highlighted spans for both light and dark themes.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ThemedHighlights {
+    pub light: HighlightedLines,
+    pub dark: HighlightedLines,
+}
+
 /// Metadata about a function definition within a file.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct FunctionInfo {
@@ -108,7 +115,7 @@ pub struct FunctionInfo {
 /// All data returned by the `/api/file` endpoint needed by the UI.
 #[derive(Debug, Clone)]
 pub struct FilePayload {
-    pub highlights: HighlightedLines,
+    pub highlights: ThemedHighlights,
     pub functions: Vec<FunctionInfo>,
 }
 

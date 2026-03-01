@@ -11,15 +11,16 @@ use crate::theme;
 /// monospace 13.0 the text is ~17 px; 20.0 gives comfortable line spacing.
 pub const ROW_HEIGHT: f32 = 20.0;
 
-/// Muted color for lines outside the focused function.
-const UNFOCUSED_GRAY: Color32 = Color32::from_rgb(0xCC, 0xCC, 0xCC);
-
 /// Pre-compute `LayoutJob`s from server-provided highlight spans.
 ///
 /// If `focus` is `Some(range)`, only lines within that range get full color;
 /// all other lines are rendered in a muted gray. If `None`, every line is
 /// highlighted normally (used when a file has no functions).
-pub fn prepare(lines: &[Vec<StyledSpan>], focus: Option<Range<usize>>) -> Vec<LayoutJob> {
+pub fn prepare(
+    lines: &[Vec<StyledSpan>],
+    focus: Option<Range<usize>>,
+    unfocused_color: Color32,
+) -> Vec<LayoutJob> {
     let code_font = FontId::monospace(13.0);
     lines
         .iter()
@@ -29,7 +30,7 @@ pub fn prepare(lines: &[Vec<StyledSpan>], focus: Option<Range<usize>>) -> Vec<La
             if in_focus {
                 build_layout_job(spans, &code_font)
             } else {
-                build_gray_layout_job(spans, &code_font)
+                build_gray_layout_job(spans, &code_font, unfocused_color)
             }
         })
         .collect()
@@ -53,14 +54,14 @@ pub fn render(
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(path)
-                    .color(theme::text_muted())
+                    .color(theme::text_muted(ui))
                     .size(12.0)
                     .monospace(),
             );
             if let Some(name) = function_label {
                 ui.label(
                     RichText::new(format!(" \u{2192} {name}"))
-                        .color(theme::accent())
+                        .color(theme::accent(ui))
                         .size(12.0)
                         .strong()
                         .monospace(),
@@ -120,7 +121,7 @@ fn build_layout_job(spans: &[StyledSpan], code_font: &FontId) -> LayoutJob {
 }
 
 /// Build a layout job where all text is rendered in muted gray.
-fn build_gray_layout_job(spans: &[StyledSpan], code_font: &FontId) -> LayoutJob {
+fn build_gray_layout_job(spans: &[StyledSpan], code_font: &FontId, color: Color32) -> LayoutJob {
     let mut job = LayoutJob::default();
     if spans.is_empty() {
         job.append(
@@ -139,7 +140,7 @@ fn build_gray_layout_job(spans: &[StyledSpan], code_font: &FontId) -> LayoutJob 
                 0.0,
                 TextFormat {
                     font_id: code_font.clone(),
-                    color: UNFOCUSED_GRAY,
+                    color,
                     ..Default::default()
                 },
             );
@@ -156,6 +157,6 @@ pub fn render_empty(ui: &mut Ui, zen_mode: bool) {
         "Select a file to view"
     };
     ui.centered_and_justified(|ui| {
-        ui.label(RichText::new(msg).color(theme::text_muted()).size(18.0));
+        ui.label(RichText::new(msg).color(theme::text_muted(ui)).size(18.0));
     });
 }
