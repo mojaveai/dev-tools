@@ -6,8 +6,8 @@ use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 
 use crate::perf::FrameStats;
 use crate::state::{
-    AsyncData, FileNode, FilePayload, FilesResponse, FunctionInfo, HighlightedLines, SharedAsync,
-    collect_paths, shared_loading,
+    AsyncData, FileNode, FilePayload, FilesResponse, FunctionInfo, FunctionRef, FunctionRelations,
+    HighlightedLines, SharedAsync, collect_paths, shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -20,6 +20,13 @@ struct FileResponse {
     content: String,
     highlights: HighlightedLines,
     functions: Vec<FunctionInfo>,
+}
+
+/// Response shape for GET /api/function-relations
+#[derive(serde::Deserialize)]
+struct FunctionRelationsResponse {
+    callers: Vec<FunctionRef>,
+    callees: Vec<FunctionRef>,
 }
 
 /// Resolved file content — no mutex needed during rendering.
@@ -38,6 +45,12 @@ enum FileContent {
     Error(String),
 }
 
+enum FunctionRelationsState {
+    Empty,
+    Ready(FunctionRelations),
+    Error(String),
+}
+
 pub struct CodeReviewApp {
     /// In-flight file list fetch — polled each frame.
     pending_file_list: Option<SharedAsync<FilesResponse>>,
@@ -49,6 +62,10 @@ pub struct CodeReviewApp {
     pending_content: Option<SharedAsync<FilePayload>>,
     /// Resolved content — lives here lock-free after the fetch completes.
     content: FileContent,
+    /// In-flight fetch for focused-function caller/callee data.
+    pending_relations: Option<SharedAsync<FunctionRelations>>,
+    /// Resolved caller/callee info for the focused function.
+    relations: FunctionRelationsState,
     theme_applied: bool,
     frame_stats: FrameStats,
     zen_mode: bool,
@@ -77,6 +94,8 @@ impl CodeReviewApp {
             selected_path: None,
             pending_content: None,
             content: FileContent::Empty,
+            pending_relations: None,
+            relations: FunctionRelationsState::Empty,
             theme_applied: false,
             frame_stats: FrameStats::new(),
             zen_mode: true,
@@ -112,6 +131,8 @@ impl CodeReviewApp {
         let shared: SharedAsync<FilePayload> = shared_loading();
         self.pending_content = Some(Arc::clone(&shared));
         self.content = FileContent::Empty;
+        self.pending_relations = None;
+        self.relations = FunctionRelationsState::Empty;
 
         let url = format!("/api/file?path={}", js_encode_uri_component(path));
         let ctx = ctx.clone();
@@ -133,9 +154,39 @@ impl CodeReviewApp {
         });
     }
 
+    fn fetch_function_relations(&mut self, path: &str, start_line: usize, ctx: &egui::Context) {
+        let shared: SharedAsync<FunctionRelations> = shared_loading();
+        self.pending_relations = Some(Arc::clone(&shared));
+        self.relations = FunctionRelationsState::Empty;
+
+        let url = format!(
+            "/api/function-relations?path={}&start_line={start_line}",
+            js_encode_uri_component(path)
+        );
+        let ctx = ctx.clone();
+
+        ehttp::fetch(ehttp::Request::get(&url), move |result| {
+            let value = match result {
+                Ok(response) => {
+                    serde_json::from_slice::<FunctionRelationsResponse>(&response.bytes)
+                        .map(|resp| {
+                            AsyncData::Loaded(FunctionRelations {
+                                callers: resp.callers,
+                                callees: resp.callees,
+                            })
+                        })
+                        .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
+                }
+                Err(err) => AsyncData::Error(err),
+            };
+            *shared.lock().unwrap() = value;
+            ctx.request_repaint();
+        });
+    }
+
     /// Move data out of the async handle once it arrives, converting spans
     /// to `LayoutJob`s exactly once. After this, rendering is lock-free.
-    fn poll_pending_content(&mut self) {
+    fn poll_pending_content(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.pending_content.clone() else {
             return;
         };
@@ -157,13 +208,54 @@ impl CodeReviewApp {
                     functions: payload.functions,
                 };
                 self.apply_function_scroll(0);
+                self.refresh_focused_relations(ctx);
             }
             AsyncData::Error(err) => {
                 self.content = FileContent::Error(err);
+                self.pending_relations = None;
+                self.relations = FunctionRelationsState::Empty;
             }
             AsyncData::Loading => unreachable!(),
         }
         self.pending_content = None;
+    }
+
+    /// Move focused-function relationship data out of the async handle.
+    fn poll_pending_relations(&mut self) {
+        let Some(pending) = self.pending_relations.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(relations) => {
+                self.relations = FunctionRelationsState::Ready(relations);
+            }
+            AsyncData::Error(err) => {
+                self.relations = FunctionRelationsState::Error(err);
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_relations = None;
+    }
+
+    /// Start caller/callee fetch for the currently focused function.
+    fn refresh_focused_relations(&mut self, ctx: &egui::Context) {
+        let (Some(path), Some(func)) =
+            (self.selected_path.as_deref(), self.focused_function_info())
+        else {
+            self.pending_relations = None;
+            self.relations = FunctionRelationsState::Empty;
+            return;
+        };
+
+        let path = path.to_owned();
+        let start_line = func.start_line;
+        self.fetch_function_relations(&path, start_line, ctx);
     }
 
     /// Check if the in-flight file-list fetch has completed. When new files
@@ -237,7 +329,7 @@ impl CodeReviewApp {
 
     /// Advance to the next function, or the next file if at the last function.
     fn navigate_next(&mut self, ctx: &egui::Context) {
-        if self.try_focus_function(self.focused_function + 1) {
+        if self.try_focus_function(self.focused_function + 1, ctx) {
             return;
         }
         // Move to next file
@@ -250,7 +342,7 @@ impl CodeReviewApp {
 
     /// Go back to the previous function, or the previous file (last function) if at the first.
     fn navigate_prev(&mut self, ctx: &egui::Context) {
-        if self.focused_function > 0 && self.try_focus_function(self.focused_function - 1) {
+        if self.focused_function > 0 && self.try_focus_function(self.focused_function - 1, ctx) {
             return;
         }
         // Move to previous file — focused_function will be set to last once content loads
@@ -278,7 +370,7 @@ impl CodeReviewApp {
 
     /// Try to focus function at `index` within the current file's function list.
     /// Returns `true` if successful, `false` if out of bounds.
-    fn try_focus_function(&mut self, index: usize) -> bool {
+    fn try_focus_function(&mut self, index: usize, ctx: &egui::Context) -> bool {
         let FileContent::Ready {
             jobs,
             spans,
@@ -296,6 +388,7 @@ impl CodeReviewApp {
         let focus = focus_range(functions, index);
         *jobs = code_viewer::prepare(spans, focus);
         self.apply_function_scroll(index);
+        self.refresh_focused_relations(ctx);
         true
     }
 
@@ -314,8 +407,18 @@ impl CodeReviewApp {
     /// The name of the currently focused function, if any.
     fn focused_function_name(&self) -> Option<&str> {
         match &self.content {
+            FileContent::Ready { functions, .. } if !functions.is_empty() => functions
+                .get(self.focused_function)
+                .map(|f| f.name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Metadata for the currently focused function, if any.
+    fn focused_function_info(&self) -> Option<&FunctionInfo> {
+        match &self.content {
             FileContent::Ready { functions, .. } if !functions.is_empty() => {
-                functions.get(self.focused_function).map(|f| f.name.as_str())
+                functions.get(self.focused_function)
             }
             _ => None,
         }
@@ -327,6 +430,118 @@ impl CodeReviewApp {
             FileContent::Ready { functions, .. } => functions.len(),
             _ => 0,
         }
+    }
+
+    fn render_relations_panel(&self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Call Graph")
+                .strong()
+                .size(14.0)
+                .color(theme::text_primary()),
+        );
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        let Some(focused) = self.focused_function_info() else {
+            ui.label(
+                RichText::new("No focused function")
+                    .size(12.0)
+                    .color(theme::text_muted()),
+            );
+            return;
+        };
+
+        ui.label(
+            RichText::new(format!(
+                "{}  (line {})",
+                focused.name,
+                focused.start_line + 1
+            ))
+            .size(12.0)
+            .color(theme::accent())
+            .strong(),
+        );
+        ui.add_space(8.0);
+
+        if self.pending_relations.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Resolving callers/callees...")
+                        .size(12.0)
+                        .color(theme::text_muted()),
+                );
+            });
+            return;
+        }
+
+        match &self.relations {
+            FunctionRelationsState::Ready(relations) => {
+                self.render_relation_section(
+                    ui,
+                    "Direct Callees",
+                    &relations.callees,
+                    "No direct callees",
+                );
+                ui.add_space(8.0);
+                self.render_relation_section(ui, "Callers", &relations.callers, "No callers");
+            }
+            FunctionRelationsState::Error(err) => {
+                ui.colored_label(egui::Color32::RED, format!("Call graph error: {err}"));
+            }
+            FunctionRelationsState::Empty => {
+                ui.label(
+                    RichText::new("No relationship data yet")
+                        .size(12.0)
+                        .color(theme::text_muted()),
+                );
+            }
+        }
+    }
+
+    fn render_relation_section(
+        &self,
+        ui: &mut egui::Ui,
+        title: &str,
+        items: &[FunctionRef],
+        empty_msg: &str,
+    ) {
+        ui.label(
+            RichText::new(title)
+                .size(12.0)
+                .color(theme::text_primary())
+                .strong(),
+        );
+        ui.add_space(4.0);
+
+        if items.is_empty() {
+            ui.label(
+                RichText::new(empty_msg)
+                    .size(11.0)
+                    .color(theme::text_muted()),
+            );
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .max_height(180.0)
+            .show(ui, |ui| {
+                items.iter().for_each(|item| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}:{}  {}",
+                            item.path,
+                            item.start_line + 1,
+                            item.name
+                        ))
+                        .size(11.0)
+                        .monospace()
+                        .color(theme::text_primary()),
+                    );
+                });
+            });
     }
 }
 
@@ -353,7 +568,8 @@ impl eframe::App for CodeReviewApp {
         }
 
         self.poll_file_list(ctx);
-        self.poll_pending_content();
+        self.poll_pending_content(ctx);
+        self.poll_pending_relations();
 
         // When navigating backwards, clamp focused_function to the last function.
         if self.focused_function == usize::MAX
@@ -372,6 +588,7 @@ impl eframe::App for CodeReviewApp {
                 .map(|f| f.start_line as f32 * code_viewer::ROW_HEIGHT)
                 .unwrap_or(0.0);
             self.scroll_generation += 1;
+            self.refresh_focused_relations(ctx);
         }
 
         // Arrow key navigation
@@ -455,11 +672,8 @@ impl eframe::App for CodeReviewApp {
                     ui.add_space(4.0);
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        if let Some(path) = file_browser::render(
-                            ui,
-                            &self.file_tree,
-                            self.selected_path.as_deref(),
-                        )
+                        if let Some(path) =
+                            file_browser::render(ui, &self.file_tree, self.selected_path.as_deref())
                             && self.selected_path.as_deref() != Some(path.as_str())
                         {
                             self.selected_path = Some(path.clone());
@@ -472,13 +686,19 @@ impl eframe::App for CodeReviewApp {
                 });
         }
 
+        SidePanel::right("function_relations")
+            .default_width(320.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                self.render_relations_panel(ui);
+            });
+
         // Bottom nav bar (zen mode only, when files are loaded)
         if self.zen_mode && file_count > 0 {
             TopBottomPanel::bottom("zen_nav").show(ctx, |ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let at_start =
-                        current_pos.is_none_or(|i| i == 0) && self.focused_function == 0;
+                    let at_start = current_pos.is_none_or(|i| i == 0) && self.focused_function == 0;
                     let at_end = current_pos.is_some_and(|i| i + 1 >= file_count)
                         && (func_count == 0 || self.focused_function + 1 >= func_count);
 
@@ -521,29 +741,27 @@ impl eframe::App for CodeReviewApp {
         };
 
         // Central panel: code viewer
-        CentralPanel::default().show(ctx, |ui| {
-            match (&self.selected_path, &self.content) {
-                (Some(path), FileContent::Ready { jobs, .. }) => {
-                    code_viewer::render(
-                        ui,
-                        jobs,
-                        path,
-                        self.scroll_generation,
-                        scroll_y,
-                        func_name.as_deref(),
-                    );
-                }
-                (Some(_), FileContent::Error(err)) => {
-                    ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
-                }
-                (Some(_), FileContent::Empty) => {
-                    ui.centered_and_justified(|ui| {
-                        ui.spinner();
-                    });
-                }
-                _ => {
-                    code_viewer::render_empty(ui, self.zen_mode);
-                }
+        CentralPanel::default().show(ctx, |ui| match (&self.selected_path, &self.content) {
+            (Some(path), FileContent::Ready { jobs, .. }) => {
+                code_viewer::render(
+                    ui,
+                    jobs,
+                    path,
+                    self.scroll_generation,
+                    scroll_y,
+                    func_name.as_deref(),
+                );
+            }
+            (Some(_), FileContent::Error(err)) => {
+                ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+            }
+            (Some(_), FileContent::Empty) => {
+                ui.centered_and_justified(|ui| {
+                    ui.spinner();
+                });
+            }
+            _ => {
+                code_viewer::render_empty(ui, self.zen_mode);
             }
         });
 

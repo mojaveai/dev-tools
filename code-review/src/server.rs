@@ -2,13 +2,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use serde::Deserialize;
 
+use crate::callgraph::{CallGraphStore, FunctionRelations};
 use crate::files;
 use crate::functions::{self, FunctionInfo};
 use crate::highlighting::{Highlighter, StyledSpan};
@@ -25,6 +26,7 @@ pub struct AppState {
     pub file_paths: Arc<RwLock<Vec<String>>>,
     pub scan_complete: Arc<AtomicBool>,
     pub highlighter: Arc<Highlighter>,
+    pub call_graph: Arc<CallGraphStore>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -34,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/code_review_ui_bg.wasm", get(serve_wasm))
         .route("/api/files", get(api_files))
         .route("/api/file", get(api_file))
+        .route("/api/function-relations", get(api_function_relations))
         .with_state(state)
 }
 
@@ -108,17 +111,25 @@ async fn api_file(
     let content_for_hl = content.clone();
 
     let content_for_fn = content.clone();
-    let highlights = tokio::task::spawn_blocking(move || {
-        highlighter.highlight(&content_for_hl, &path_for_hl)
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Highlight failed: {e}")))?;
+    let highlights =
+        tokio::task::spawn_blocking(move || highlighter.highlight(&content_for_hl, &path_for_hl))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Highlight failed: {e}"),
+                )
+            })?;
 
-    let functions = tokio::task::spawn_blocking(move || {
-        functions::extract_python_functions(&content_for_fn)
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Function parse failed: {e}")))?;
+    let functions =
+        tokio::task::spawn_blocking(move || functions::extract_python_functions(&content_for_fn))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Function parse failed: {e}"),
+                )
+            })?;
 
     Ok(axum::Json(FileResponse {
         path: query.path,
@@ -126,4 +137,33 @@ async fn api_file(
         highlights,
         functions,
     }))
+}
+
+#[derive(Deserialize)]
+struct FunctionRelationsQuery {
+    path: String,
+    start_line: usize,
+}
+
+async fn api_function_relations(
+    State(state): State<AppState>,
+    Query(query): Query<FunctionRelationsQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    files::safe_resolve(&state.root, &query.path)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid path".to_owned()))?;
+
+    let files = state.file_paths.read().unwrap().clone();
+
+    let relations: FunctionRelations = state
+        .call_graph
+        .relationships_for(&state.root, &files, &query.path, query.start_line)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Call graph analysis failed: {e}"),
+            )
+        })?;
+
+    Ok(axum::Json(relations))
 }

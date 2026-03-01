@@ -23,10 +23,12 @@ Key reference notes for developing with egui 0.33 / eframe 0.33.
 - Call `ctx.request_repaint()` in the callback to wake egui when data arrives
 - Clone the `egui::Context` before moving into the callback closure
 - Drop `MutexGuard` before rendering UI that might re-lock (e.g., tree rendering after checking load state)
+- For expensive secondary analysis (like call graphs), trigger fetches only when selection/focus changes, not every frame
 
 ## Layout Tips
 
 - `SidePanel::left("id").default_width(260.0).resizable(true)` for file browsers
+- `SidePanel::right("id").default_width(...).resizable(true)` works well for contextual metadata panes
 - `TopBottomPanel::top("id")` for headers — renders before central panel
 - `CentralPanel::default()` fills remaining space — must be added last
 - `ScrollArea::both().auto_shrink([false, false])` for code viewers that fill space

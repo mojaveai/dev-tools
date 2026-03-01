@@ -1,3 +1,4 @@
+mod callgraph;
 mod files;
 mod functions;
 mod highlighting;
@@ -21,9 +22,7 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().expect("Cannot determine current directory"));
 
-    let root = root
-        .canonicalize()
-        .expect("Cannot canonicalize root path");
+    let root = root.canonicalize().expect("Cannot canonicalize root path");
 
     let highlighter = highlighting::Highlighter::new();
 
@@ -35,6 +34,7 @@ async fn main() {
         file_paths: Arc::clone(&file_paths),
         scan_complete: Arc::clone(&scan_complete),
         highlighter: Arc::new(highlighter),
+        call_graph: Arc::new(callgraph::CallGraphStore::new()),
     };
 
     // Discover files in the background — server starts serving immediately.
@@ -53,9 +53,7 @@ async fn main() {
         warn!("Could not open browser: {e}");
     }
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(listener, app).await.expect("Server error");
 }
 
 async fn bind_available_port(start: u16) -> (tokio::net::TcpListener, u16) {

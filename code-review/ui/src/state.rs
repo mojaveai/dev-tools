@@ -56,9 +56,9 @@ fn insert_path(nodes: &mut Vec<FileNode>, full_path: &str, parts: &[&str]) {
             });
         }
         [dir, rest @ ..] => {
-            let existing = nodes.iter_mut().find(|n| {
-                matches!(n, FileNode::Dir { name, .. } if name == dir)
-            });
+            let existing = nodes
+                .iter_mut()
+                .find(|n| matches!(n, FileNode::Dir { name, .. } if name == dir));
             match existing {
                 Some(FileNode::Dir { children, .. }) => {
                     insert_path(children, full_path, rest);
@@ -110,6 +110,21 @@ pub struct FunctionInfo {
 pub struct FilePayload {
     pub highlights: HighlightedLines,
     pub functions: Vec<FunctionInfo>,
+}
+
+/// Function location used by caller/callee relationships.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FunctionRef {
+    pub path: String,
+    pub name: String,
+    pub start_line: usize,
+}
+
+/// Direct caller/callee relationships for a function.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct FunctionRelations {
+    pub callers: Vec<FunctionRef>,
+    pub callees: Vec<FunctionRef>,
 }
 
 /// Collect all file paths from the tree in display order (depth-first, dirs first).
