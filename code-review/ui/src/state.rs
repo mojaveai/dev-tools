@@ -97,6 +97,22 @@ pub struct StyledSpan {
 /// All highlighted lines for a file.
 pub type HighlightedLines = Vec<Vec<StyledSpan>>;
 
+/// Collect all file paths from the tree in display order (depth-first, dirs first).
+pub fn collect_paths(nodes: &[FileNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_paths_inner(nodes, &mut out);
+    out
+}
+
+fn collect_paths_inner(nodes: &[FileNode], out: &mut Vec<String>) {
+    for node in nodes {
+        match node {
+            FileNode::Dir { children, .. } => collect_paths_inner(children, out),
+            FileNode::File { path, .. } => out.push(path.clone()),
+        }
+    }
+}
+
 /// Sort tree: directories first (alphabetical), then files (alphabetical).
 fn sort_tree(nodes: &mut [FileNode]) {
     nodes.sort_by(|a, b| {

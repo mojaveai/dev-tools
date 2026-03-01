@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use eframe::Frame;
-use egui::{CentralPanel, SidePanel, TopBottomPanel, RichText};
+use egui::{CentralPanel, Key, SidePanel, TopBottomPanel, RichText};
 use egui::text::LayoutJob;
 
 use crate::perf::FrameStats;
-use crate::state::{AsyncData, FileNode, HighlightedLines, SharedAsync, shared_loading};
+use crate::state::{AsyncData, FileNode, HighlightedLines, SharedAsync, collect_paths, shared_loading};
 use crate::{code_viewer, file_browser, theme};
 
 /// Response shape for GET /api/file
@@ -31,6 +31,8 @@ enum FileContent {
 pub struct CodeReviewApp {
     file_list: SharedAsync<Vec<String>>,
     file_tree: Vec<FileNode>,
+    /// Flat file paths in tree-display order, for sequential navigation.
+    flat_paths: Vec<String>,
     selected_path: Option<String>,
     /// In-flight fetch handle — polled each frame until resolved.
     pending_content: Option<SharedAsync<HighlightedLines>>,
@@ -38,6 +40,7 @@ pub struct CodeReviewApp {
     content: FileContent,
     theme_applied: bool,
     frame_stats: FrameStats,
+    zen_mode: bool,
 }
 
 impl CodeReviewApp {
@@ -45,11 +48,13 @@ impl CodeReviewApp {
         Self {
             file_list: shared_loading(),
             file_tree: Vec::new(),
+            flat_paths: Vec::new(),
             selected_path: None,
             pending_content: None,
             content: FileContent::Empty,
             theme_applied: false,
             frame_stats: FrameStats::new(),
+            zen_mode: true,
         }
     }
 
@@ -124,7 +129,38 @@ impl CodeReviewApp {
             && !paths.is_empty()
         {
             self.file_tree = FileNode::build_tree(paths);
+            self.flat_paths = collect_paths(&self.file_tree);
         }
+    }
+
+    /// Index of the currently selected file in the flat path list.
+    fn current_index(&self) -> Option<usize> {
+        let sel = self.selected_path.as_deref()?;
+        self.flat_paths.iter().position(|p| p == sel)
+    }
+
+    /// Navigate to the file at `index`, fetching its content.
+    fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
+        if let Some(path) = self.flat_paths.get(index).cloned() {
+            self.selected_path = Some(path.clone());
+            self.fetch_file_content(&path, ctx);
+        }
+    }
+
+    fn navigate_next(&mut self, ctx: &egui::Context) {
+        let next = self
+            .current_index()
+            .map(|i| (i + 1).min(self.flat_paths.len().saturating_sub(1)))
+            .unwrap_or(0);
+        self.navigate_to(next, ctx);
+    }
+
+    fn navigate_prev(&mut self, ctx: &egui::Context) {
+        let prev = self
+            .current_index()
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(0);
+        self.navigate_to(prev, ctx);
     }
 }
 
@@ -140,6 +176,17 @@ impl eframe::App for CodeReviewApp {
         self.update_tree_if_needed();
         self.poll_pending_content();
 
+        // Arrow key navigation (works in both modes)
+        if ctx.input(|i| i.key_pressed(Key::ArrowRight)) {
+            self.navigate_next(ctx);
+        }
+        if ctx.input(|i| i.key_pressed(Key::ArrowLeft)) {
+            self.navigate_prev(ctx);
+        }
+
+        let file_count = self.flat_paths.len();
+        let current_pos = self.current_index();
+
         // Top bar
         TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.add_space(4.0);
@@ -151,60 +198,101 @@ impl eframe::App for CodeReviewApp {
                         .color(theme::text_primary()),
                 );
                 ui.separator();
-                let file_count = self.file_list.lock().unwrap()
-                    .as_loaded()
-                    .map_or(0, Vec::len);
+                let count_label = current_pos.map_or_else(
+                    || format!("{file_count} files"),
+                    |i| format!("{} / {file_count}", i + 1),
+                );
                 ui.label(
-                    RichText::new(format!("{file_count} files"))
+                    RichText::new(count_label)
                         .color(theme::text_muted())
                         .size(12.0),
                 );
+
+                // Right-align the zen mode toggle
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.checkbox(
+                        &mut self.zen_mode,
+                        RichText::new("Zen Mode").size(12.0).color(theme::text_muted()),
+                    );
+                });
             });
             ui.add_space(4.0);
         });
 
-        // Left panel: file browser
-        SidePanel::left("file_browser")
-            .default_width(260.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("Files")
-                        .strong()
-                        .size(14.0)
-                        .color(theme::text_primary()),
-                );
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
+        // Left panel: file browser (hidden in zen mode)
+        if !self.zen_mode {
+            SidePanel::left("file_browser")
+                .default_width(260.0)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Files")
+                            .strong()
+                            .size(14.0)
+                            .color(theme::text_primary()),
+                    );
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
 
-                let data = self.file_list.lock().unwrap();
-                match &*data {
-                    AsyncData::Loading => {
-                        ui.spinner();
-                        ui.label("Loading files...");
+                    let data = self.file_list.lock().unwrap();
+                    match &*data {
+                        AsyncData::Loading => {
+                            ui.spinner();
+                            ui.label("Loading files...");
+                        }
+                        AsyncData::Error(err) => {
+                            ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+                        }
+                        AsyncData::Loaded(_) => {
+                            drop(data); // release lock before rendering tree
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                if let Some(path) = file_browser::render(
+                                    ui,
+                                    &self.file_tree,
+                                    self.selected_path.as_deref(),
+                                )
+                                    && self.selected_path.as_deref() != Some(path.as_str())
+                                {
+                                    self.selected_path = Some(path.clone());
+                                    self.fetch_file_content(&path, ctx);
+                                }
+                            });
+                        }
                     }
-                    AsyncData::Error(err) => {
-                        ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+                });
+        }
+
+        // Bottom nav bar (zen mode only, when files are loaded)
+        if self.zen_mode && file_count > 0 {
+            TopBottomPanel::bottom("zen_nav").show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let at_start = current_pos.is_none_or(|i| i == 0);
+                    let at_end = current_pos.is_some_and(|i| i + 1 >= file_count);
+
+                    if ui.add_enabled(!at_start, egui::Button::new(
+                        RichText::new("\u{2190} Prev").size(13.0),
+                    )).clicked() {
+                        self.navigate_prev(ctx);
                     }
-                    AsyncData::Loaded(_) => {
-                        drop(data); // release lock before rendering tree
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            if let Some(path) = file_browser::render(
-                                ui,
-                                &self.file_tree,
-                                self.selected_path.as_deref(),
-                            )
-                                && self.selected_path.as_deref() != Some(path.as_str())
-                            {
-                                self.selected_path = Some(path.clone());
-                                self.fetch_file_content(&path, ctx);
-                            }
-                        });
+
+                    if ui.add_enabled(!at_end, egui::Button::new(
+                        RichText::new("Next \u{2192}").size(13.0),
+                    )).clicked() {
+                        self.navigate_next(ctx);
                     }
-                }
+
+                    ui.label(
+                        RichText::new("\u{2190}\u{2192} arrow keys")
+                            .size(11.0)
+                            .color(theme::text_muted()),
+                    );
+                });
+                ui.add_space(4.0);
             });
+        }
 
         // Central panel: code viewer
         CentralPanel::default().show(ctx, |ui| {
@@ -221,7 +309,7 @@ impl eframe::App for CodeReviewApp {
                     });
                 }
                 _ => {
-                    code_viewer::render_empty(ui);
+                    code_viewer::render_empty(ui, self.zen_mode);
                 }
             }
         });
