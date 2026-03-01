@@ -6,9 +6,9 @@ use egui::{CentralPanel, Key, RichText, SidePanel, TopBottomPanel};
 
 use crate::perf::FrameStats;
 use crate::state::{
-    AsyncData, CallTreeNode, FileNode, FilePayload, FilesResponse, FunctionInfo, FunctionRef,
-    FunctionRelations, HighlightedLines, SharedAsync, ThemedHighlights, collect_paths,
-    shared_loading,
+    AsyncData, CallTreeNode, DiffData, DiffFilesResponse, DiffMode, DiffResponse, FileNode,
+    FilePayload, FileScope, FilesResponse, FunctionInfo, FunctionRef, FunctionRelations,
+    HighlightedLines, SharedAsync, ThemedHighlights, collect_paths, shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -107,6 +107,24 @@ pub struct CodeReviewApp {
     scroll_offset_y: f32,
     /// Index of the currently focused function within the file.
     focused_function: usize,
+    /// Which file subset to navigate in zen mode.
+    file_scope: FileScope,
+    /// Subset of `flat_paths` matching the current scope.
+    filtered_paths: Vec<String>,
+    /// Files changed relative to HEAD.
+    head_changed: Vec<String>,
+    /// Files changed relative to the base branch.
+    branch_changed: Vec<String>,
+    /// In-flight diff for the currently selected file.
+    pending_diff: Option<SharedAsync<DiffResponse>>,
+    /// Resolved diff data for gutter painting.
+    current_diff: Option<DiffData>,
+    /// In-flight fetch for HEAD-changed file list.
+    pending_head_files: Option<SharedAsync<DiffFilesResponse>>,
+    /// In-flight fetch for branch-changed file list.
+    pending_branch_files: Option<SharedAsync<DiffFilesResponse>>,
+    /// Whether the repo is a git repo (None = not yet checked).
+    is_git_repo: Option<bool>,
 }
 
 impl CodeReviewApp {
@@ -133,6 +151,15 @@ impl CodeReviewApp {
             last_applied_scroll: 0,
             scroll_offset_y: 0.0,
             focused_function: 0,
+            file_scope: FileScope::ChangedHead,
+            filtered_paths: Vec::new(),
+            head_changed: Vec::new(),
+            branch_changed: Vec::new(),
+            pending_diff: None,
+            current_diff: None,
+            pending_head_files: None,
+            pending_branch_files: None,
+            is_git_repo: None,
         }
     }
 
@@ -402,12 +429,14 @@ impl CodeReviewApp {
 
                 let new_count = resp.files.len();
                 if new_count != self.known_file_count {
-                    let auto_open = self.known_file_count == 0 && new_count > 0;
+                    let first_load = self.known_file_count == 0 && new_count > 0;
                     self.known_file_count = new_count;
                     self.file_tree = FileNode::build_tree(&resp.files);
                     self.flat_paths = collect_paths(&self.file_tree);
+                    self.rebuild_filtered_paths();
 
-                    if auto_open {
+                    if first_load {
+                        self.fetch_diff_file_lists(ctx);
                         self.navigate_to(0, ctx);
                     }
                 }
@@ -435,20 +464,21 @@ impl CodeReviewApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 
-    /// Index of the currently selected file in the flat path list.
+    /// Index of the currently selected file in the active path list.
     fn current_index(&self) -> Option<usize> {
         let sel = self.selected_path.as_deref()?;
-        self.flat_paths.iter().position(|p| p == sel)
+        self.active_paths().iter().position(|p| p == sel)
     }
 
-    /// Navigate to the file at `index`, fetching its content.
+    /// Navigate to the file at `index` in the active path list, fetching its content.
     fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
-        if let Some(path) = self.flat_paths.get(index).cloned() {
+        if let Some(path) = self.active_paths().get(index).cloned() {
             self.selected_path = Some(path.clone());
             self.focused_function = 0;
             self.scroll_generation += 1;
             self.scroll_offset_y = 0.0;
             self.fetch_file_content(&path, ctx);
+            self.fetch_diff(&path, ctx);
         }
     }
 
@@ -457,10 +487,10 @@ impl CodeReviewApp {
         if self.try_focus_function(self.focused_function + 1, ctx) {
             return;
         }
-        // Move to next file
+        let paths_len = self.active_paths().len();
         let next = self
             .current_index()
-            .map(|i| (i + 1).min(self.flat_paths.len().saturating_sub(1)))
+            .map(|i| (i + 1).min(paths_len.saturating_sub(1)))
             .unwrap_or(0);
         self.navigate_to(next, ctx);
     }
@@ -470,7 +500,6 @@ impl CodeReviewApp {
         if self.focused_function > 0 && self.try_focus_function(self.focused_function - 1, ctx) {
             return;
         }
-        // Move to previous file — focused_function will be set to last once content loads
         let prev = self
             .current_index()
             .map(|i| i.saturating_sub(1))
@@ -483,13 +512,13 @@ impl CodeReviewApp {
 
     /// Navigate to a file and focus its last function (for backward navigation).
     fn navigate_to_last_function(&mut self, index: usize, ctx: &egui::Context) {
-        if let Some(path) = self.flat_paths.get(index).cloned() {
+        if let Some(path) = self.active_paths().get(index).cloned() {
             self.selected_path = Some(path.clone());
-            // Set a sentinel value — will be clamped in poll_pending_content
             self.focused_function = usize::MAX;
             self.scroll_generation += 1;
             self.scroll_offset_y = 0.0;
             self.fetch_file_content(&path, ctx);
+            self.fetch_diff(&path, ctx);
         }
     }
 
@@ -580,6 +609,196 @@ impl CodeReviewApp {
     fn close_quick_view(&mut self) {
         self.pending_quick_view = None;
         self.quick_view = QuickViewState::Closed;
+    }
+
+    /// The file list used for navigation — scoped in zen mode, full otherwise.
+    fn active_paths(&self) -> &[String] {
+        if self.zen_mode && self.is_git_repo == Some(true) {
+            &self.filtered_paths
+        } else {
+            &self.flat_paths
+        }
+    }
+
+    /// The diff mode implied by the current file scope.
+    fn diff_mode(&self) -> DiffMode {
+        match self.file_scope {
+            FileScope::ChangedBranch => DiffMode::Branch,
+            FileScope::ChangedHead | FileScope::All => DiffMode::Head,
+        }
+    }
+
+    /// Rebuild `filtered_paths` from the current scope and changed-file lists.
+    fn rebuild_filtered_paths(&mut self) {
+        let changed = match self.file_scope {
+            FileScope::ChangedHead => &self.head_changed,
+            FileScope::ChangedBranch => &self.branch_changed,
+            FileScope::All => {
+                self.filtered_paths = self.flat_paths.clone();
+                return;
+            }
+        };
+        self.filtered_paths = self
+            .flat_paths
+            .iter()
+            .filter(|p| changed.contains(p))
+            .cloned()
+            .collect();
+    }
+
+    /// Kick off fetches for the HEAD- and branch-changed file lists.
+    fn fetch_diff_file_lists(&mut self, ctx: &egui::Context) {
+        // HEAD changed files
+        {
+            let shared: SharedAsync<DiffFilesResponse> = shared_loading();
+            self.pending_head_files = Some(Arc::clone(&shared));
+            let ctx = ctx.clone();
+            ehttp::fetch(
+                ehttp::Request::get("/api/diff/files?mode=head"),
+                move |result| {
+                    let value = match result {
+                        Ok(response) => {
+                            serde_json::from_slice::<DiffFilesResponse>(&response.bytes)
+                                .map(AsyncData::Loaded)
+                                .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
+                        }
+                        Err(err) => AsyncData::Error(err),
+                    };
+                    *shared.lock().unwrap() = value;
+                    ctx.request_repaint();
+                },
+            );
+        }
+
+        // Branch changed files
+        {
+            let shared: SharedAsync<DiffFilesResponse> = shared_loading();
+            self.pending_branch_files = Some(Arc::clone(&shared));
+            let ctx = ctx.clone();
+            ehttp::fetch(
+                ehttp::Request::get("/api/diff/files?mode=branch"),
+                move |result| {
+                    let value = match result {
+                        Ok(response) => {
+                            serde_json::from_slice::<DiffFilesResponse>(&response.bytes)
+                                .map(AsyncData::Loaded)
+                                .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}")))
+                        }
+                        Err(err) => AsyncData::Error(err),
+                    };
+                    *shared.lock().unwrap() = value;
+                    ctx.request_repaint();
+                },
+            );
+        }
+    }
+
+    /// Fetch diff data for the given file path and current diff mode.
+    fn fetch_diff(&mut self, path: &str, ctx: &egui::Context) {
+        if self.is_git_repo != Some(true) {
+            return;
+        }
+        let shared: SharedAsync<DiffResponse> = shared_loading();
+        self.pending_diff = Some(Arc::clone(&shared));
+        self.current_diff = None;
+
+        let mode = match self.diff_mode() {
+            DiffMode::Head => "head",
+            DiffMode::Branch => "branch",
+        };
+        let url = format!(
+            "/api/diff?path={}&mode={mode}",
+            js_encode_uri_component(path)
+        );
+        let ctx = ctx.clone();
+
+        ehttp::fetch(ehttp::Request::get(&url), move |result| {
+            let value = match result {
+                Ok(response) => serde_json::from_slice::<DiffResponse>(&response.bytes)
+                    .map(AsyncData::Loaded)
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
+                Err(err) => AsyncData::Error(err),
+            };
+            *shared.lock().unwrap() = value;
+            ctx.request_repaint();
+        });
+    }
+
+    /// Poll the in-flight diff fetch and resolve it into `current_diff`.
+    fn poll_pending_diff(&mut self) {
+        let Some(pending) = self.pending_diff.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                self.current_diff = Some(DiffData {
+                    line_statuses: resp.line_statuses,
+                    deleted_before: resp.deleted_before,
+                });
+            }
+            AsyncData::Error(_) => {
+                self.current_diff = None;
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_diff = None;
+    }
+
+    /// Poll the HEAD changed-files fetch.
+    fn poll_pending_head_files(&mut self) {
+        let Some(pending) = self.pending_head_files.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                self.head_changed = resp.changed_files;
+                self.is_git_repo = Some(true);
+                self.rebuild_filtered_paths();
+            }
+            AsyncData::Error(_) => {
+                // Not a git repo or git not available — disable diff features
+                if self.is_git_repo.is_none() {
+                    self.is_git_repo = Some(false);
+                    self.file_scope = FileScope::All;
+                    self.rebuild_filtered_paths();
+                }
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_head_files = None;
+    }
+
+    /// Poll the branch changed-files fetch.
+    fn poll_pending_branch_files(&mut self) {
+        let Some(pending) = self.pending_branch_files.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                self.branch_changed = resp.changed_files;
+                self.rebuild_filtered_paths();
+            }
+            AsyncData::Error(_) => {
+                // Branch detection failed — that's OK, head mode still works
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_branch_files = None;
     }
 
     fn render_quick_view_window(&mut self, ctx: &egui::Context) {
@@ -1059,6 +1278,9 @@ impl eframe::App for CodeReviewApp {
         self.poll_pending_content(ctx);
         self.poll_pending_relations();
         self.poll_pending_quick_view(ctx);
+        self.poll_pending_diff();
+        self.poll_pending_head_files();
+        self.poll_pending_branch_files();
 
         // When navigating backwards, clamp focused_function to the last function.
         if self.focused_function == usize::MAX
@@ -1092,11 +1314,15 @@ impl eframe::App for CodeReviewApp {
             self.navigate_prev(ctx);
         }
 
-        let file_count = self.flat_paths.len();
+        let file_count = self.active_paths().len();
+        let total_file_count = self.flat_paths.len();
         let current_pos = self.current_index();
         let func_name = self.focused_function_name().map(String::from);
         let func_count = self.function_count();
         let focused_fn = self.focused_function;
+        let is_git = self.is_git_repo == Some(true);
+        let head_count = self.head_changed.len();
+        let branch_count = self.branch_changed.len();
 
         // Top bar
         TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -1134,7 +1360,7 @@ impl eframe::App for CodeReviewApp {
                     ui.spinner();
                 }
 
-                // Right-align the zen mode toggle
+                // Right-align the zen mode toggle and scope selector
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.checkbox(
                         &mut self.zen_mode,
@@ -1142,6 +1368,36 @@ impl eframe::App for CodeReviewApp {
                             .size(12.0)
                             .color(theme::text_muted(ui)),
                     );
+
+                    // Scope selector (only in zen mode, only in git repos)
+                    if self.zen_mode && is_git {
+                        ui.separator();
+                        let mut scope = self.file_scope;
+                        ui.selectable_value(
+                            &mut scope,
+                            FileScope::All,
+                            RichText::new(format!("All [{total_file_count}]")).size(11.0),
+                        );
+                        ui.selectable_value(
+                            &mut scope,
+                            FileScope::ChangedBranch,
+                            RichText::new(format!("Branch [{branch_count}]")).size(11.0),
+                        );
+                        ui.selectable_value(
+                            &mut scope,
+                            FileScope::ChangedHead,
+                            RichText::new(format!("HEAD [{head_count}]")).size(11.0),
+                        );
+                        if scope != self.file_scope {
+                            self.file_scope = scope;
+                            self.rebuild_filtered_paths();
+                            // Re-fetch diff for current file with the new mode
+                            if let Some(path) = self.selected_path.clone() {
+                                self.fetch_diff(&path, ctx);
+                            }
+                        }
+                        ui.separator();
+                    }
 
                     let mut theme_preference = ui.ctx().options(|opt| opt.theme_preference);
                     ui.label(
@@ -1202,6 +1458,7 @@ impl eframe::App for CodeReviewApp {
                             self.scroll_generation += 1;
                             self.scroll_offset_y = 0.0;
                             self.fetch_file_content(&path, ctx);
+                            self.fetch_diff(&path, ctx);
                         }
                     });
                 });
@@ -1273,6 +1530,7 @@ impl eframe::App for CodeReviewApp {
                     self.scroll_generation,
                     scroll_y,
                     func_name.as_deref(),
+                    self.current_diff.as_ref(),
                 );
             }
             (Some(_), FileContent::Error(err)) => {

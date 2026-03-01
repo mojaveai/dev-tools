@@ -76,6 +76,59 @@ fn insert_path(nodes: &mut Vec<FileNode>, full_path: &str, parts: &[&str]) {
     }
 }
 
+// ── Git diff types ──────────────────────────────────────────────────
+
+/// Whether to diff against HEAD or a base branch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffMode {
+    Head,
+    Branch,
+}
+
+/// Per-line change status from the server-side diff.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineStatus {
+    Unchanged,
+    Added,
+    Modified,
+}
+
+/// Which subset of files to navigate in zen mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FileScope {
+    ChangedHead,
+    ChangedBranch,
+    All,
+}
+
+/// Response from GET /api/diff
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DiffResponse {
+    #[allow(dead_code)]
+    pub path: String,
+    #[allow(dead_code)]
+    pub mode: DiffMode,
+    pub line_statuses: Vec<LineStatus>,
+    pub deleted_before: Vec<usize>,
+}
+
+/// Response from GET /api/diff/files
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DiffFilesResponse {
+    #[allow(dead_code)]
+    pub mode: DiffMode,
+    pub changed_files: Vec<String>,
+}
+
+/// Pre-resolved diff data passed into the code viewer for gutter painting.
+#[derive(Debug, Clone)]
+pub struct DiffData {
+    pub line_statuses: Vec<LineStatus>,
+    pub deleted_before: Vec<usize>,
+}
+
 /// Response shape for GET /api/files — includes scanning progress.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct FilesResponse {

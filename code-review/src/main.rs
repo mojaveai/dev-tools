@@ -1,6 +1,7 @@
 mod callgraph;
 mod files;
 mod functions;
+mod git;
 mod highlighting;
 mod server;
 
@@ -35,6 +36,7 @@ async fn main() {
         scan_complete: Arc::clone(&scan_complete),
         highlighter: Arc::new(highlighter),
         call_graph: Arc::new(callgraph::CallGraphStore::new()),
+        git_diff: Arc::new(git::GitDiffStore::new()),
     };
 
     // Discover files in the background — server starts serving immediately.

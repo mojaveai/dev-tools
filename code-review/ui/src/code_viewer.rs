@@ -1,15 +1,21 @@
 use std::ops::Range;
 
 use egui::text::LayoutJob;
-use egui::{Color32, FontId, RichText, ScrollArea, TextFormat, Ui};
+use egui::{Color32, FontId, Rect, RichText, ScrollArea, TextFormat, Ui, Vec2};
 
-use crate::state::StyledSpan;
+use crate::state::{DiffData, LineStatus, StyledSpan};
 use crate::theme;
 
 /// Row height used for virtual scrolling.  We zero out `item_spacing.y` inside
 /// the code scroll area so this value is the *total* row stride.  With
 /// monospace 13.0 the text is ~17 px; 20.0 gives comfortable line spacing.
 pub const ROW_HEIGHT: f32 = 20.0;
+
+/// Width of the colored diff gutter strip on the left margin.
+const GUTTER_WIDTH: f32 = 4.0;
+
+/// Horizontal padding between the gutter strip and the code text.
+const GUTTER_PAD: f32 = 6.0;
 
 /// Pre-compute `LayoutJob`s from server-provided highlight spans.
 ///
@@ -41,6 +47,10 @@ pub fn prepare(
 /// `scroll_y` is applied as the initial vertical offset when the scroll area
 /// is first created (after a `scroll_generation` bump). Pass `None` on
 /// subsequent frames to let the user scroll freely.
+///
+/// If `diff` is provided, a colored gutter strip is painted to the left of
+/// each changed line (green = added, yellow = modified) and a thin red line
+/// marks positions where lines were deleted.
 pub fn render(
     ui: &mut Ui,
     jobs: &[LayoutJob],
@@ -48,7 +58,10 @@ pub fn render(
     scroll_generation: u64,
     scroll_y: Option<f32>,
     function_label: Option<&str>,
+    diff: Option<&DiffData>,
 ) {
+    let has_diff = diff.is_some();
+
     ui.vertical(|ui| {
         // File path header, optionally with focused function name
         ui.horizontal(|ui| {
@@ -76,6 +89,11 @@ pub fn render(
         // This keeps scroll offset calculations (start_line * ROW_HEIGHT) accurate.
         ui.spacing_mut().item_spacing.y = 0.0;
 
+        // Reserve left padding for the gutter when diff data is present.
+        if has_diff {
+            ui.spacing_mut().indent = GUTTER_WIDTH + GUTTER_PAD;
+        }
+
         let mut area = ScrollArea::both()
             .id_salt(scroll_generation)
             .auto_shrink([false, false]);
@@ -85,8 +103,54 @@ pub fn render(
         }
 
         area.show_rows(ui, ROW_HEIGHT, jobs.len(), |ui, visible_range| {
+            // Capture gutter colors once per frame (avoids per-row lookups)
+            let added_color = theme::diff_added(ui);
+            let modified_color = theme::diff_modified(ui);
+            let deleted_color = theme::diff_deleted(ui);
+
             for i in visible_range {
-                ui.label(jobs[i].clone());
+                let response = ui.label(jobs[i].clone());
+
+                if let Some(diff) = diff {
+                    let row_rect = response.rect;
+
+                    // Paint gutter strip for added/modified lines
+                    if let Some(status) = diff.line_statuses.get(i) {
+                        let color = match status {
+                            LineStatus::Added => Some(added_color),
+                            LineStatus::Modified => Some(modified_color),
+                            LineStatus::Unchanged => None,
+                        };
+                        if let Some(color) = color {
+                            let gutter_rect = Rect::from_min_size(
+                                egui::pos2(
+                                    row_rect.min.x - GUTTER_PAD - GUTTER_WIDTH,
+                                    row_rect.min.y,
+                                ),
+                                Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
+                            );
+                            ui.painter().rect_filled(
+                                gutter_rect,
+                                egui::CornerRadius::ZERO,
+                                color,
+                            );
+                        }
+                    }
+
+                    // Paint thin red line where deletions occurred
+                    if diff.deleted_before.contains(&i) {
+                        let y = row_rect.min.y;
+                        let line_rect = Rect::from_min_size(
+                            egui::pos2(row_rect.min.x - GUTTER_PAD - GUTTER_WIDTH, y - 1.0),
+                            Vec2::new(row_rect.width() + GUTTER_PAD + GUTTER_WIDTH, 2.0),
+                        );
+                        ui.painter().rect_filled(
+                            line_rect,
+                            egui::CornerRadius::ZERO,
+                            deleted_color,
+                        );
+                    }
+                }
             }
         });
     });

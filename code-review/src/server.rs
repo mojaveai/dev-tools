@@ -12,6 +12,7 @@ use serde::Deserialize;
 use crate::callgraph::{CallGraphStore, FunctionRelations};
 use crate::files;
 use crate::functions::{self, FunctionInfo};
+use crate::git::{self, DiffMode, GitDiffStore};
 use crate::highlighting::{Highlighter, ThemedHighlights};
 
 // Embed build artifacts at compile time
@@ -27,6 +28,7 @@ pub struct AppState {
     pub scan_complete: Arc<AtomicBool>,
     pub highlighter: Arc<Highlighter>,
     pub call_graph: Arc<CallGraphStore>,
+    pub git_diff: Arc<GitDiffStore>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -38,6 +40,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/file", get(api_file))
         .route("/api/function-code", get(api_function_code))
         .route("/api/function-relations", get(api_function_relations))
+        .route("/api/diff/files", get(api_diff_files))
+        .route("/api/diff", get(api_diff))
+        .route("/api/diff/refresh", get(api_diff_refresh))
         .with_state(state)
 }
 
@@ -240,6 +245,81 @@ async fn api_function_relations(
         })?;
 
     Ok(axum::Json(relations))
+}
+
+// ── Diff endpoints ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DiffFilesQuery {
+    mode: DiffMode,
+}
+
+#[derive(serde::Serialize)]
+struct DiffFilesResponse {
+    mode: DiffMode,
+    changed_files: Vec<String>,
+}
+
+async fn api_diff_files(
+    State(state): State<AppState>,
+    Query(query): Query<DiffFilesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let files = state
+        .git_diff
+        .changed_files(&state.root, query.mode)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(axum::Json(DiffFilesResponse {
+        mode: query.mode,
+        changed_files: files,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DiffQuery {
+    path: String,
+    mode: DiffMode,
+}
+
+#[derive(serde::Serialize)]
+struct DiffResponse {
+    path: String,
+    mode: DiffMode,
+    line_statuses: Vec<git::LineStatus>,
+    deleted_before: Vec<usize>,
+}
+
+async fn api_diff(
+    State(state): State<AppState>,
+    Query(query): Query<DiffQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let resolved = files::safe_resolve(&state.root, &query.path)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid path".to_owned()))?;
+
+    let content = tokio::fs::read_to_string(&resolved)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("Cannot read file: {e}")))?;
+
+    let total_lines = content.lines().count();
+
+    let diff = state
+        .git_diff
+        .file_diff(&state.root, &query.path, query.mode, total_lines)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(axum::Json(DiffResponse {
+        path: query.path,
+        mode: query.mode,
+        line_statuses: diff.line_statuses,
+        deleted_before: diff.deleted_before,
+    }))
+}
+
+async fn api_diff_refresh(State(state): State<AppState>) -> impl IntoResponse {
+    state.git_diff.invalidate().await;
+    StatusCode::OK
 }
 
 fn slice_lines(content: &str, start_line: usize, end_line: usize) -> Option<String> {
