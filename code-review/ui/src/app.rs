@@ -23,6 +23,16 @@ struct FileResponse {
     functions: Vec<FunctionInfo>,
 }
 
+/// Response shape for GET /api/function-code
+#[derive(serde::Deserialize)]
+struct FunctionCodeResponse {
+    path: String,
+    name: String,
+    start_line: usize,
+    end_line: usize,
+    highlights: ThemedHighlights,
+}
+
 /// Resolved file content — no mutex needed during rendering.
 enum FileContent {
     /// No file selected or fetch in progress.
@@ -45,6 +55,21 @@ enum FunctionRelationsState {
     Error(String),
 }
 
+enum QuickViewState {
+    Closed,
+    Loading(FunctionRef),
+    Ready {
+        function: FunctionRef,
+        end_line: usize,
+        highlights: ThemedHighlights,
+        jobs: Vec<LayoutJob>,
+    },
+    Error {
+        function: FunctionRef,
+        message: String,
+    },
+}
+
 pub struct CodeReviewApp {
     /// In-flight file list fetch — polled each frame.
     pending_file_list: Option<SharedAsync<FilesResponse>>,
@@ -60,6 +85,10 @@ pub struct CodeReviewApp {
     pending_relations: Option<SharedAsync<FunctionRelations>>,
     /// Resolved caller/callee info for the focused function.
     relations: FunctionRelationsState,
+    /// In-flight fetch for the right-panel quick reference popup.
+    pending_quick_view: Option<SharedAsync<FunctionCodeResponse>>,
+    /// Popup state for previewing another function's code.
+    quick_view: QuickViewState,
     theme_applied: bool,
     last_theme: Option<egui::Theme>,
     frame_stats: FrameStats,
@@ -91,6 +120,8 @@ impl CodeReviewApp {
             content: FileContent::Empty,
             pending_relations: None,
             relations: FunctionRelationsState::Empty,
+            pending_quick_view: None,
+            quick_view: QuickViewState::Closed,
             theme_applied: false,
             last_theme: None,
             frame_stats: FrameStats::new(),
@@ -173,6 +204,30 @@ impl CodeReviewApp {
         });
     }
 
+    fn fetch_function_code(&mut self, function: FunctionRef, ctx: &egui::Context) {
+        let shared: SharedAsync<FunctionCodeResponse> = shared_loading();
+        self.pending_quick_view = Some(Arc::clone(&shared));
+        self.quick_view = QuickViewState::Loading(function.clone());
+
+        let url = format!(
+            "/api/function-code?path={}&start_line={}",
+            js_encode_uri_component(&function.path),
+            function.start_line
+        );
+        let ctx = ctx.clone();
+
+        ehttp::fetch(ehttp::Request::get(&url), move |result| {
+            let value = match result {
+                Ok(response) => serde_json::from_slice::<FunctionCodeResponse>(&response.bytes)
+                    .map(AsyncData::Loaded)
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
+                Err(err) => AsyncData::Error(err),
+            };
+            *shared.lock().unwrap() = value;
+            ctx.request_repaint();
+        });
+    }
+
     /// Move data out of the async handle once it arrives, converting spans
     /// to `LayoutJob`s exactly once. After this, rendering is lock-free.
     fn poll_pending_content(&mut self, ctx: &egui::Context) {
@@ -236,6 +291,54 @@ impl CodeReviewApp {
         self.pending_relations = None;
     }
 
+    /// Move quick-view function source data out of the async handle.
+    fn poll_pending_quick_view(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_quick_view.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(response) => {
+                let function = FunctionRef {
+                    path: response.path,
+                    name: response.name,
+                    start_line: response.start_line,
+                };
+                let jobs = code_viewer::prepare(
+                    highlights_for_theme(&response.highlights, ctx.theme()),
+                    None,
+                    theme::unfocused_code_for(ctx.theme()),
+                );
+                self.quick_view = QuickViewState::Ready {
+                    function,
+                    end_line: response.end_line,
+                    highlights: response.highlights,
+                    jobs,
+                };
+            }
+            AsyncData::Error(err) => {
+                let function = match &self.quick_view {
+                    QuickViewState::Loading(function)
+                    | QuickViewState::Ready { function, .. }
+                    | QuickViewState::Error { function, .. } => Some(function.clone()),
+                    QuickViewState::Closed => None,
+                };
+                self.quick_view =
+                    function.map_or(QuickViewState::Closed, |function| QuickViewState::Error {
+                        function,
+                        message: err,
+                    });
+            }
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_quick_view = None;
+    }
+
     fn reprepare_code_for_theme(&mut self, active_theme: egui::Theme) {
         if let FileContent::Ready {
             jobs,
@@ -247,6 +350,19 @@ impl CodeReviewApp {
             *jobs = code_viewer::prepare(
                 highlights_for_theme(highlights, active_theme),
                 focus,
+                theme::unfocused_code_for(active_theme),
+            );
+        }
+    }
+
+    fn reprepare_quick_view_for_theme(&mut self, active_theme: egui::Theme) {
+        if let QuickViewState::Ready {
+            highlights, jobs, ..
+        } = &mut self.quick_view
+        {
+            *jobs = code_viewer::prepare(
+                highlights_for_theme(highlights, active_theme),
+                None,
                 theme::unfocused_code_for(active_theme),
             );
         }
@@ -456,7 +572,133 @@ impl CodeReviewApp {
         }
     }
 
-    fn render_relations_panel(&self, ui: &mut egui::Ui) {
+    fn open_quick_view(&mut self, function: FunctionRef, ctx: &egui::Context) {
+        self.close_quick_view();
+        self.fetch_function_code(function, ctx);
+    }
+
+    fn close_quick_view(&mut self) {
+        self.pending_quick_view = None;
+        self.quick_view = QuickViewState::Closed;
+    }
+
+    fn render_quick_view_window(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.close_quick_view();
+            return;
+        }
+
+        if matches!(self.quick_view, QuickViewState::Closed) {
+            return;
+        }
+
+        let (title, subtitle) = match &self.quick_view {
+            QuickViewState::Loading(function) => (
+                format!("Quick Reference: {}", function.name),
+                format!("{}:{}", function.path, function.start_line + 1),
+            ),
+            QuickViewState::Ready {
+                function, end_line, ..
+            } => (
+                format!("Quick Reference: {}", function.name),
+                format!(
+                    "{}:{}-{}",
+                    function.path,
+                    function.start_line + 1,
+                    *end_line
+                ),
+            ),
+            QuickViewState::Error { function, .. } => (
+                format!("Quick Reference: {}", function.name),
+                format!("{}:{}", function.path, function.start_line + 1),
+            ),
+            QuickViewState::Closed => return,
+        };
+
+        let mut is_open = true;
+        let mut close_requested = false;
+
+        egui::Window::new(title)
+            .id(egui::Id::new("quick-reference-window"))
+            .open(&mut is_open)
+            .resizable(true)
+            .collapsible(false)
+            .default_width(760.0)
+            .default_height(520.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(subtitle.as_str())
+                            .size(11.0)
+                            .monospace()
+                            .color(theme::text_muted(ui)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button(RichText::new("Close (Esc)").size(11.0))
+                            .on_hover_text("Dismiss this quick reference popup")
+                            .clicked()
+                        {
+                            close_requested = true;
+                        }
+                    });
+                });
+                ui.separator();
+                ui.add_space(4.0);
+
+                match &self.quick_view {
+                    QuickViewState::Loading(_) => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(
+                                RichText::new("Loading function source...")
+                                    .size(12.0)
+                                    .color(theme::text_muted(ui)),
+                            );
+                        });
+                    }
+                    QuickViewState::Ready { jobs, .. } => {
+                        egui::Frame {
+                            fill: theme::entry_fill(ui, 0),
+                            stroke: egui::Stroke::new(1.0, theme::entry_stroke(ui, false)),
+                            corner_radius: egui::CornerRadius::same(6),
+                            inner_margin: egui::Margin::same(8),
+                            ..Default::default()
+                        }
+                        .show(ui, |ui| {
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            egui::ScrollArea::both()
+                                .id_salt("quick-view-code")
+                                .auto_shrink([false, false])
+                                .show_rows(
+                                    ui,
+                                    code_viewer::ROW_HEIGHT,
+                                    jobs.len(),
+                                    |ui, visible_range| {
+                                        visible_range.for_each(|i| {
+                                            ui.label(jobs[i].clone());
+                                        });
+                                    },
+                                );
+                        });
+                    }
+                    QuickViewState::Error { message, .. } => {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            format!("Could not load function code: {message}"),
+                        );
+                    }
+                    QuickViewState::Closed => {}
+                }
+            });
+
+        if !is_open || close_requested {
+            self.close_quick_view();
+        }
+    }
+
+    fn render_relations_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.label(
             RichText::new("Call Graph")
@@ -500,12 +742,16 @@ impl CodeReviewApp {
             return;
         }
 
+        let panel_ctx = ui.ctx().clone();
         match &self.relations {
             FunctionRelationsState::Ready(relations) => {
+                let callee_tree = relations.callee_tree.clone();
+                let caller_tree = relations.caller_tree.clone();
+                let test_callers = relations.test_callers.clone();
                 self.render_tree_section(
                     ui,
                     "Callees",
-                    &relations.callee_tree,
+                    &callee_tree,
                     "No direct callees",
                     "callee",
                     "Expand nodes to walk down the call stack",
@@ -514,13 +760,13 @@ impl CodeReviewApp {
                 self.render_tree_section(
                     ui,
                     "Callers",
-                    &relations.caller_tree,
+                    &caller_tree,
                     "No callers",
                     "caller",
                     "Expand nodes to walk up the call stack",
                 );
                 ui.add_space(8.0);
-                self.render_test_section(ui, &relations.test_callers);
+                self.render_test_section(ui, &test_callers, &panel_ctx);
             }
             FunctionRelationsState::Error(err) => {
                 ui.colored_label(egui::Color32::RED, format!("Call graph error: {err}"));
@@ -568,15 +814,17 @@ impl CodeReviewApp {
     }
 
     fn render_function_entry(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         function: &FunctionRef,
         depth: usize,
         cycle: bool,
         is_test: bool,
+        ctx: &egui::Context,
     ) {
         let fill = theme::entry_fill(ui, depth);
         let border = theme::entry_stroke(ui, cycle);
+        let mut open_quick_view = false;
 
         egui::Frame {
             fill,
@@ -587,12 +835,18 @@ impl CodeReviewApp {
         }
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(function.name.as_str())
-                        .size(12.0)
-                        .strong()
-                        .color(theme::text_primary(ui)),
-                );
+                let name_response = ui
+                    .add(
+                        egui::Label::new(
+                            RichText::new(function.name.as_str())
+                                .size(12.0)
+                                .strong()
+                                .color(theme::text_primary(ui)),
+                        )
+                        .sense(egui::Sense::click()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                open_quick_view |= name_response.clicked();
 
                 if is_test {
                     ui.label(
@@ -615,17 +869,27 @@ impl CodeReviewApp {
                 }
             });
 
-            ui.label(
-                RichText::new(format!("{}:{}", function.path, function.start_line + 1))
-                    .size(10.5)
-                    .monospace()
-                    .color(theme::text_muted(ui)),
-            );
+            let path_response = ui
+                .add(
+                    egui::Label::new(
+                        RichText::new(format!("{}:{}", function.path, function.start_line + 1))
+                            .size(10.5)
+                            .monospace()
+                            .color(theme::text_muted(ui)),
+                    )
+                    .sense(egui::Sense::click()),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            open_quick_view |= path_response.clicked();
         });
+
+        if open_quick_view {
+            self.open_quick_view(function.clone(), ctx);
+        }
     }
 
     fn render_tree_section(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         title: &str,
         items: &[CallTreeNode],
@@ -653,11 +917,17 @@ impl CodeReviewApp {
 
             ui.label(RichText::new(hint).size(10.5).color(theme::text_muted(ui)));
             ui.add_space(4.0);
-            self.render_tree_nodes(ui, items, id_prefix, 0);
+            let ctx = ui.ctx().clone();
+            self.render_tree_nodes(ui, items, id_prefix, 0, ctx);
         });
     }
 
-    fn render_test_section(&self, ui: &mut egui::Ui, items: &[FunctionRef]) {
+    fn render_test_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[FunctionRef],
+        ctx: &egui::Context,
+    ) {
         egui::CollapsingHeader::new(
             RichText::new(format!("Tests ({})", items.len()))
                 .size(12.0)
@@ -683,25 +953,26 @@ impl CodeReviewApp {
             );
             ui.add_space(4.0);
             items.iter().for_each(|item| {
-                self.render_function_entry(ui, item, 0, false, true);
+                self.render_function_entry(ui, item, 0, false, true, ctx);
                 ui.add_space(3.0);
             });
         });
     }
 
     fn render_tree_nodes(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         items: &[CallTreeNode],
         id_prefix: &str,
         depth: usize,
+        ctx: egui::Context,
     ) {
         items.iter().enumerate().for_each(|(index, item)| {
             let id = format!(
                 "{id_prefix}:{depth}:{index}:{}:{}",
                 item.function.path, item.function.start_line
             );
-            self.render_tree_node(ui, item, id.as_str(), depth + 1);
+            self.render_tree_node(ui, item, id.as_str(), depth + 1, &ctx);
             if index + 1 < items.len() {
                 ui.add_space(3.0);
             }
@@ -709,17 +980,18 @@ impl CodeReviewApp {
     }
 
     fn render_tree_node(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         item: &CallTreeNode,
         node_id: &str,
         depth: usize,
+        ctx: &egui::Context,
     ) {
         if item.children.is_empty() {
             let indent = (depth.saturating_sub(1) as f32 * 12.0).min(72.0);
             ui.horizontal(|ui| {
                 ui.add_space(indent);
-                self.render_function_entry(ui, &item.function, depth, item.cycle, false);
+                self.render_function_entry(ui, &item.function, depth, item.cycle, false, ctx);
             });
 
             if item.truncated {
@@ -737,10 +1009,10 @@ impl CodeReviewApp {
         let _ =
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
-                    self.render_function_entry(ui, &item.function, depth, item.cycle, false);
+                    self.render_function_entry(ui, &item.function, depth, item.cycle, false, ctx);
                 })
                 .body(|ui| {
-                    self.render_tree_nodes(ui, &item.children, node_id, depth);
+                    self.render_tree_nodes(ui, &item.children, node_id, depth, ctx.clone());
                     if item.truncated {
                         ui.label(
                             RichText::new("... more nodes omitted")
@@ -786,6 +1058,7 @@ impl eframe::App for CodeReviewApp {
         self.poll_file_list(ctx);
         self.poll_pending_content(ctx);
         self.poll_pending_relations();
+        self.poll_pending_quick_view(ctx);
 
         // When navigating backwards, clamp focused_function to the last function.
         if self.focused_function == usize::MAX
@@ -898,6 +1171,7 @@ impl eframe::App for CodeReviewApp {
         let active_theme = ctx.theme();
         if self.last_theme != Some(active_theme) {
             self.reprepare_code_for_theme(active_theme);
+            self.reprepare_quick_view_for_theme(active_theme);
             self.last_theme = Some(active_theme);
         }
 
@@ -1013,6 +1287,8 @@ impl eframe::App for CodeReviewApp {
                 code_viewer::render_empty(ui, self.zen_mode);
             }
         });
+
+        self.render_quick_view_window(ctx);
 
         self.frame_stats.end(t0);
     }

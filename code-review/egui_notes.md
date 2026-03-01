@@ -36,6 +36,9 @@ Key reference notes for developing with egui 0.33 / eframe 0.33.
 - `CentralPanel::default()` fills remaining space — must be added last
 - `ScrollArea::both().auto_shrink([false, false])` for code viewers that fill space
 - `CollapsingHeader` for tree nodes, `selectable_label` for leaf items
+- `egui::Window::new("...").open(&mut open)` gives a fast-dismiss popup via built-in `X`; pair with explicit `Esc` handling for keyboard-close
+- Window placement persistence is keyed by egui id/title; set a stable `.id(egui::Id::new("..."))` if popup position should stay fixed across content changes
+- `egui::Label::new(...).sense(egui::Sense::click())` is useful when you want clickable rich labels without button styling
 - `centered_and_justified` for centered empty-state messages
 
 ## Rich Text with LayoutJob

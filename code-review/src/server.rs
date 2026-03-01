@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/code_review_ui_bg.wasm", get(serve_wasm))
         .route("/api/files", get(api_files))
         .route("/api/file", get(api_file))
+        .route("/api/function-code", get(api_function_code))
         .route("/api/function-relations", get(api_function_relations))
         .with_state(state)
 }
@@ -145,6 +146,79 @@ struct FunctionRelationsQuery {
     start_line: usize,
 }
 
+#[derive(Deserialize)]
+struct FunctionCodeQuery {
+    path: String,
+    start_line: usize,
+}
+
+#[derive(serde::Serialize)]
+struct FunctionCodeResponse {
+    path: String,
+    name: String,
+    start_line: usize,
+    end_line: usize,
+    highlights: ThemedHighlights,
+}
+
+async fn api_function_code(
+    State(state): State<AppState>,
+    Query(query): Query<FunctionCodeQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let resolved = files::safe_resolve(&state.root, &query.path)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid path".to_owned()))?;
+
+    let content = tokio::fs::read_to_string(&resolved)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("Cannot read file: {e}")))?;
+
+    let content_for_fn = content.clone();
+    let functions =
+        tokio::task::spawn_blocking(move || functions::extract_python_functions(&content_for_fn))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Function parse failed: {e}"),
+                )
+            })?;
+
+    let Some(function) = functions
+        .into_iter()
+        .find(|f| f.start_line == query.start_line)
+    else {
+        return Err((StatusCode::NOT_FOUND, "Function not found".to_owned()));
+    };
+
+    let code = slice_lines(&content, function.start_line, function.end_line).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            "Function range is invalid".to_owned(),
+        )
+    })?;
+
+    let highlighter = Arc::clone(&state.highlighter);
+    let path_for_hl = query.path.clone();
+    let code_for_hl = code.clone();
+    let highlights =
+        tokio::task::spawn_blocking(move || highlighter.highlight(&code_for_hl, &path_for_hl))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Highlight failed: {e}"),
+                )
+            })?;
+
+    Ok(axum::Json(FunctionCodeResponse {
+        path: query.path,
+        name: function.name,
+        start_line: function.start_line,
+        end_line: function.end_line,
+        highlights,
+    }))
+}
+
 async fn api_function_relations(
     State(state): State<AppState>,
     Query(query): Query<FunctionRelationsQuery>,
@@ -166,4 +240,18 @@ async fn api_function_relations(
         })?;
 
     Ok(axum::Json(relations))
+}
+
+fn slice_lines(content: &str, start_line: usize, end_line: usize) -> Option<String> {
+    if start_line >= end_line {
+        return None;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    if start_line >= lines.len() {
+        return None;
+    }
+
+    let clamped_end = end_line.min(lines.len());
+    Some(lines[start_line..clamped_end].join("\n"))
 }
