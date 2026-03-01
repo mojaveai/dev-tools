@@ -6,9 +6,10 @@ use egui::{Color32, FontId, RichText, ScrollArea, TextFormat, Ui};
 use crate::state::StyledSpan;
 use crate::theme;
 
-/// Row height sans spacing — must match the actual height each line renders at.
-/// With monospace 13.0 the text is ~17px; we round to 18.0 for breathing room.
-pub const ROW_HEIGHT: f32 = 18.0;
+/// Row height used for virtual scrolling.  We zero out `item_spacing.y` inside
+/// the code scroll area so this value is the *total* row stride.  With
+/// monospace 13.0 the text is ~17 px; 20.0 gives comfortable line spacing.
+pub const ROW_HEIGHT: f32 = 20.0;
 
 /// Muted color for lines outside the focused function.
 const UNFOCUSED_GRAY: Color32 = Color32::from_rgb(0xCC, 0xCC, 0xCC);
@@ -69,6 +70,10 @@ pub fn render(
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(4.0);
+
+        // Zero out vertical item spacing so ROW_HEIGHT is the exact row stride.
+        // This keeps scroll offset calculations (start_line * ROW_HEIGHT) accurate.
+        ui.spacing_mut().item_spacing.y = 0.0;
 
         let mut area = ScrollArea::both()
             .id_salt(scroll_generation)
