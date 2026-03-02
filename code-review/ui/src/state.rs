@@ -131,6 +131,33 @@ pub struct DiffFilesResponse {
     pub changed_files: Vec<String>,
 }
 
+/// Response from GET /api/review-order
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReviewOrderResponse {
+    #[allow(dead_code)]
+    pub mode: DiffMode,
+    #[serde(default)]
+    pub files: Vec<ReviewOrderFile>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReviewOrderFile {
+    pub path: String,
+    #[allow(dead_code)]
+    pub score: f32,
+    #[allow(dead_code)]
+    pub changed_lines: usize,
+    #[serde(default)]
+    pub functions: Vec<ReviewOrderFunction>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReviewOrderFunction {
+    pub start_line: usize,
+    #[allow(dead_code)]
+    pub score: f32,
+}
+
 /// Pre-resolved diff data passed into the code viewer for rendering.
 #[derive(Debug, Clone)]
 pub struct DiffData {

@@ -45,7 +45,12 @@ impl WebHandle {
                 eframe::WebOptions::default(),
                 Box::new(|cc| {
                     let mut app = app::CodeReviewApp::new();
+                    // Fire both fetches in parallel so the first navigation
+                    // can happen as soon as both the file list and git status
+                    // are known.
                     app.fetch_file_list(&cc.egui_ctx);
+                    app.fetch_diff_file_lists(&cc.egui_ctx);
+                    app.fetch_review_order_lists(&cc.egui_ctx);
                     Ok(Box::new(app))
                 }),
             )

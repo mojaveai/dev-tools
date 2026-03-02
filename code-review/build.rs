@@ -11,7 +11,9 @@ fn main() {
     let wasm_target_dir = out_dir.join("wasm-target");
     let wasm_dist_dir = out_dir.join("wasm-dist");
 
-    // Step 1: Build the UI crate for wasm32
+    // Step 1: Build the UI crate for wasm32, optimized for size.
+    // Environment overrides keep these settings isolated to the WASM build
+    // without affecting the host-target release profile.
     let status = Command::new("cargo")
         .args([
             "build",
@@ -23,6 +25,10 @@ fn main() {
             "--target-dir",
         ])
         .arg(&wasm_target_dir)
+        .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "z")
+        .env("CARGO_PROFILE_RELEASE_LTO", "true")
+        .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
+        .env("CARGO_PROFILE_RELEASE_STRIP", "true")
         .status()
         .expect("Failed to run cargo build for WASM. Is the wasm32-unknown-unknown target installed? Run: rustup target add wasm32-unknown-unknown");
 
@@ -51,9 +57,41 @@ fn main() {
 
     assert!(status.success(), "wasm-bindgen failed.");
 
-    // Step 3: Emit paths as env vars for the server to embed
-    let js_path = wasm_dist_dir.join("code_review_ui.js");
+    // Step 3: Shrink the WASM binary with wasm-opt (best-effort).
+    // Uses a temp file because wasm-opt cannot read and write the same path.
     let wasm_bg_path = wasm_dist_dir.join("code_review_ui_bg.wasm");
+    let wasm_opt_tmp = wasm_dist_dir.join("code_review_ui_bg.opt.wasm");
+    match Command::new("wasm-opt")
+        .arg("-Oz")
+        .arg("--enable-bulk-memory")
+        .arg("--enable-sign-ext")
+        .arg("--enable-mutable-globals")
+        .arg("--enable-nontrapping-float-to-int")
+        .arg("--output")
+        .arg(&wasm_opt_tmp)
+        .arg(&wasm_bg_path)
+        .status()
+    {
+        Ok(s) if s.success() => {
+            std::fs::rename(&wasm_opt_tmp, &wasm_bg_path)
+                .expect("Failed to rename wasm-opt output");
+            println!("cargo::warning=wasm-opt applied successfully");
+        }
+        Ok(_) => {
+            // Clean up temp file on failure
+            let _ = std::fs::remove_file(&wasm_opt_tmp);
+            println!("cargo::warning=wasm-opt failed; skipping (binary will be larger)");
+        }
+        Err(_) => {
+            println!(
+                "cargo::warning=wasm-opt not found; skipping. \
+                 Install for smaller WASM: cargo install wasm-opt"
+            );
+        }
+    }
+
+    // Step 4: Emit paths as env vars for the server to embed
+    let js_path = wasm_dist_dir.join("code_review_ui.js");
 
     assert!(js_path.exists(), "JS glue not found at {js_path:?}");
     assert!(

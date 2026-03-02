@@ -95,12 +95,9 @@ pub async fn changed_files(root: &Path, mode: DiffMode) -> Result<Vec<String>, S
         .await
         .unwrap_or_default();
 
-    let untracked = git_cmd(
-        root,
-        &["ls-files", "--others", "--exclude-standard"],
-    )
-    .await
-    .unwrap_or_default();
+    let untracked = git_cmd(root, &["ls-files", "--others", "--exclude-standard"])
+        .await
+        .unwrap_or_default();
 
     let mut files: Vec<String> = tracked
         .lines()
@@ -302,11 +299,7 @@ impl GitDiffStore {
     }
 
     /// List files changed relative to the given diff base.  Cached after first call.
-    pub async fn changed_files(
-        &self,
-        root: &Path,
-        mode: DiffMode,
-    ) -> Result<Vec<String>, String> {
+    pub async fn changed_files(&self, root: &Path, mode: DiffMode) -> Result<Vec<String>, String> {
         // Check cache first
         {
             let cache = self.cache.read().await;
@@ -348,9 +341,12 @@ impl GitDiffStore {
 
         let mut diff = if raw.trim().is_empty() {
             // Untracked file or no diff — check if it's untracked
-            let untracked = git_cmd(root, &["ls-files", "--others", "--exclude-standard", "--", path])
-                .await
-                .unwrap_or_default();
+            let untracked = git_cmd(
+                root,
+                &["ls-files", "--others", "--exclude-standard", "--", path],
+            )
+            .await
+            .unwrap_or_default();
 
             if untracked.lines().any(|l| l.trim() == path) {
                 // Entire file is new
@@ -593,10 +589,7 @@ diff --git a/hello.py b/hello.py
         let result = parse_unified_diff(diff, 5);
         assert_eq!(result.deleted_sections.len(), 1);
         assert_eq!(result.deleted_sections[0].before_line, 1);
-        assert_eq!(
-            result.deleted_sections[0].lines,
-            vec!["old_a", "old_b"]
-        );
+        assert_eq!(result.deleted_sections[0].lines, vec!["old_a", "old_b"]);
     }
 
     #[test]

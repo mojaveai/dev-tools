@@ -226,20 +226,14 @@ pub fn render(
                                     egui::pos2(ui.clip_rect().min.x, row_top),
                                     egui::pos2(ui.clip_rect().max.x, row_top + ROW_HEIGHT),
                                 );
-                                ui.painter().rect_filled(
-                                    bg_rect,
-                                    egui::CornerRadius::ZERO,
-                                    bg,
-                                );
+                                ui.painter()
+                                    .rect_filled(bg_rect, egui::CornerRadius::ZERO, bg);
                             }
 
                             // Gutter strip
                             if let Some(color) = gutter_color {
                                 let gutter_rect = Rect::from_min_size(
-                                    egui::pos2(
-                                        content_x - GUTTER_PAD - GUTTER_WIDTH,
-                                        row_top,
-                                    ),
+                                    egui::pos2(content_x - GUTTER_PAD - GUTTER_WIDTH, row_top),
                                     Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
                                 );
                                 ui.painter().rect_filled(
@@ -267,10 +261,7 @@ pub fn render(
 
                         // Red gutter strip
                         let gutter_rect = Rect::from_min_size(
-                            egui::pos2(
-                                content_x - GUTTER_PAD - GUTTER_WIDTH,
-                                row_top,
-                            ),
+                            egui::pos2(content_x - GUTTER_PAD - GUTTER_WIDTH, row_top),
                             Vec2::new(GUTTER_WIDTH, ROW_HEIGHT),
                         );
                         ui.painter().rect_filled(

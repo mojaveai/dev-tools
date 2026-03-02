@@ -20,3 +20,4 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-fa
 tree-sitter = "0.25"
 tree-sitter-python = "0.25"
 rayon = "1.11.0"
+tower-http = { version = "0.6.8", features = ["compression-gzip"] }

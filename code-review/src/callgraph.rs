@@ -26,6 +26,18 @@ pub struct FunctionRelations {
     pub callee_tree: Vec<CallTreeNode>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReviewFunctionGraphMetrics {
+    pub path: String,
+    pub name: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub caller_count: usize,
+    pub callee_count: usize,
+    pub is_test: bool,
+    pub graph_score: f32,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CallTreeNode {
     pub function: FunctionRef,
@@ -59,6 +71,15 @@ impl CallGraphStore {
     ) -> Result<FunctionRelations, String> {
         let index = self.get_or_build_index(root, files).await?;
         Ok(index.relationships_for(path, start_line))
+    }
+
+    pub async fn graph_metrics_for_review(
+        &self,
+        root: &Path,
+        files: &[String],
+    ) -> Result<Vec<ReviewFunctionGraphMetrics>, String> {
+        let index = self.get_or_build_index(root, files).await?;
+        Ok(index.graph_metrics())
     }
 
     async fn get_or_build_index(
@@ -152,6 +173,7 @@ struct FunctionRecord {
     path: String,
     name: String,
     start_line: usize,
+    end_line: usize,
 }
 
 struct CallGraphIndex {
@@ -214,6 +236,93 @@ impl CallGraphIndex {
             }),
             callee_tree: self.tree_from(id, TraversalDirection::Down, |_| true),
         }
+    }
+
+    fn graph_metrics(&self) -> Vec<ReviewFunctionGraphMetrics> {
+        if self.functions.is_empty() {
+            return Vec::new();
+        }
+
+        let pagerank = self.compute_pagerank(14, 0.85);
+        let max_pagerank = pagerank
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max)
+            .max(f32::EPSILON);
+
+        let degree_logs: Vec<f32> = (0..self.functions.len())
+            .map(|id| (self.callers[id].len() + self.callees[id].len()) as f32)
+            .map(|deg| (deg + 1.0).ln())
+            .collect();
+        let max_degree_log = degree_logs
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max)
+            .max(f32::EPSILON);
+
+        self.functions
+            .iter()
+            .enumerate()
+            .map(|(id, function)| {
+                let caller_count = self.callers[id]
+                    .iter()
+                    .filter(|&&caller| !self.is_test_function(caller))
+                    .count();
+                let callee_count = self.callees[id]
+                    .iter()
+                    .filter(|&&callee| !self.is_test_function(callee))
+                    .count();
+                let rank_score = pagerank[id] / max_pagerank;
+                let degree_score = degree_logs[id] / max_degree_log;
+
+                ReviewFunctionGraphMetrics {
+                    path: function.path.clone(),
+                    name: function.name.clone(),
+                    start_line: function.start_line,
+                    end_line: function.end_line,
+                    caller_count,
+                    callee_count,
+                    is_test: self.is_test_function(id),
+                    graph_score: 0.72 * rank_score + 0.28 * degree_score,
+                }
+            })
+            .collect()
+    }
+
+    fn compute_pagerank(&self, iterations: usize, damping: f32) -> Vec<f32> {
+        let node_count = self.functions.len();
+        if node_count == 0 {
+            return Vec::new();
+        }
+
+        let node_count_f = node_count as f32;
+        let mut rank = vec![1.0 / node_count_f; node_count];
+
+        (0..iterations).for_each(|_| {
+            let dangling = rank
+                .iter()
+                .enumerate()
+                .filter_map(|(id, score)| self.callees[id].is_empty().then_some(*score))
+                .sum::<f32>();
+
+            let base = ((1.0 - damping) / node_count_f) + (damping * dangling / node_count_f);
+            let mut next = vec![base; node_count];
+
+            rank.iter().enumerate().for_each(|(id, score)| {
+                let out_degree = self.callees[id].len();
+                if out_degree == 0 {
+                    return;
+                }
+                let share = damping * *score / out_degree as f32;
+                self.callees[id]
+                    .iter()
+                    .for_each(|&callee| next[callee] += share);
+            });
+
+            rank = next;
+        });
+
+        rank
     }
 
     fn to_public_ref(&self, id: usize) -> FunctionRef {
@@ -417,6 +526,7 @@ struct FunctionDecl {
     key: FunctionKey,
     module: String,
     name: String,
+    end_line: usize,
     class_path: Vec<String>,
     parent_functions: Vec<String>,
 }
@@ -461,6 +571,7 @@ fn build_index_from_loaded_sources(sources: &[SourceFile]) -> CallGraphIndex {
             path: function.key.path.clone(),
             name: function.name.clone(),
             start_line: function.key.start_line,
+            end_line: function.end_line,
         })
         .collect();
 
@@ -641,6 +752,7 @@ fn collect_function_definition(
     };
 
     let start_line = decorated_start.unwrap_or_else(|| node.start_position().row);
+    let end_line = node.end_position().row + 1;
 
     functions.push(FunctionDecl {
         key: FunctionKey {
@@ -649,6 +761,7 @@ fn collect_function_definition(
         },
         module: module.to_owned(),
         name: name.clone(),
+        end_line,
         class_path: class_stack.clone(),
         parent_functions: function_stack.clone(),
     });
@@ -1759,5 +1872,35 @@ mod tests {
             let rel = index.relationships_for(file.as_str(), 3);
             assert_eq!(rel.callees.len(), 1);
         });
+    }
+
+    #[test]
+    fn graph_metrics_prioritize_shared_dependencies() {
+        let index = build_index(&[
+            ("core.py", "def critical():\n    return 1\n"),
+            (
+                "service_a.py",
+                "from core import critical\n\ndef run_a():\n    critical()\n",
+            ),
+            (
+                "service_b.py",
+                "from core import critical\n\ndef run_b():\n    critical()\n",
+            ),
+        ]);
+
+        let metrics = index.graph_metrics();
+        let score_by_name: HashMap<String, f32> = metrics
+            .iter()
+            .map(|metric| (metric.name.clone(), metric.graph_score))
+            .collect();
+
+        assert!(
+            score_by_name["critical"] > score_by_name["run_a"],
+            "critical should outrank a single caller"
+        );
+        assert!(
+            score_by_name["critical"] > score_by_name["run_b"],
+            "critical should outrank a single caller"
+        );
     }
 }

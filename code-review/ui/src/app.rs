@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use eframe::Frame;
@@ -8,7 +9,8 @@ use crate::perf::FrameStats;
 use crate::state::{
     AsyncData, CallTreeNode, DiffData, DiffFilesResponse, DiffMode, DiffResponse, FileNode,
     FilePayload, FileScope, FilesResponse, FunctionInfo, FunctionRef, FunctionRelations,
-    HighlightedLines, SharedAsync, ThemedHighlights, collect_paths, shared_loading,
+    HighlightedLines, ReviewOrderResponse, SharedAsync, ThemedHighlights, collect_paths,
+    shared_loading,
 };
 use crate::{code_viewer, file_browser, theme};
 
@@ -70,6 +72,38 @@ enum QuickViewState {
     },
 }
 
+#[derive(Debug, Clone, Default)]
+struct ReviewOrderCache {
+    file_rank: HashMap<String, usize>,
+    function_rank: HashMap<String, HashMap<usize, usize>>,
+}
+
+impl ReviewOrderCache {
+    fn from_response(resp: ReviewOrderResponse) -> Self {
+        let mut file_rank = HashMap::new();
+        let mut function_rank = HashMap::new();
+
+        resp.files
+            .into_iter()
+            .enumerate()
+            .for_each(|(file_idx, file)| {
+                file_rank.insert(file.path.clone(), file_idx);
+                let per_file = file
+                    .functions
+                    .into_iter()
+                    .enumerate()
+                    .map(|(fn_idx, function)| (function.start_line, fn_idx))
+                    .collect::<HashMap<_, _>>();
+                function_rank.insert(file.path, per_file);
+            });
+
+        Self {
+            file_rank,
+            function_rank,
+        }
+    }
+}
+
 pub struct CodeReviewApp {
     /// In-flight file list fetch — polled each frame.
     pending_file_list: Option<SharedAsync<FilesResponse>>,
@@ -123,8 +157,19 @@ pub struct CodeReviewApp {
     pending_head_files: Option<SharedAsync<DiffFilesResponse>>,
     /// In-flight fetch for branch-changed file list.
     pending_branch_files: Option<SharedAsync<DiffFilesResponse>>,
+    /// In-flight fetch for HEAD review-order ranking.
+    pending_head_review_order: Option<SharedAsync<ReviewOrderResponse>>,
+    /// In-flight fetch for branch review-order ranking.
+    pending_branch_review_order: Option<SharedAsync<ReviewOrderResponse>>,
+    /// Heuristic ranking cache for HEAD mode.
+    head_review_order: ReviewOrderCache,
+    /// Heuristic ranking cache for branch mode.
+    branch_review_order: ReviewOrderCache,
     /// Whether the repo is a git repo (None = not yet checked).
     is_git_repo: Option<bool>,
+    /// Deferred until both the file list and git status are known,
+    /// so the first file shown respects the active filter.
+    needs_initial_navigation: bool,
 }
 
 impl CodeReviewApp {
@@ -159,7 +204,12 @@ impl CodeReviewApp {
             current_diff: None,
             pending_head_files: None,
             pending_branch_files: None,
+            pending_head_review_order: None,
+            pending_branch_review_order: None,
+            head_review_order: ReviewOrderCache::default(),
+            branch_review_order: ReviewOrderCache::default(),
             is_git_repo: None,
+            needs_initial_navigation: true,
         }
     }
 
@@ -271,7 +321,12 @@ impl CodeReviewApp {
             AsyncData::Loaded(payload) => {
                 drop(guard);
                 self.focused_function = 0;
-                let focus = focus_range(&payload.functions, 0);
+                let mut functions = payload.functions;
+                if let Some(path) = self.selected_path.as_deref() {
+                    let order = self.review_order_for_scope().clone();
+                    Self::sort_functions_for_path(&mut functions, path, &order);
+                }
+                let focus = focus_range(&functions, 0);
                 let jobs = code_viewer::prepare(
                     highlights_for_theme(&payload.highlights, ctx.theme()),
                     focus,
@@ -280,7 +335,7 @@ impl CodeReviewApp {
                 self.content = FileContent::Ready {
                     jobs,
                     highlights: payload.highlights,
-                    functions: payload.functions,
+                    functions,
                 };
                 self.apply_function_scroll(0);
                 self.refresh_focused_relations(ctx);
@@ -436,8 +491,10 @@ impl CodeReviewApp {
                     self.rebuild_filtered_paths();
 
                     if first_load {
-                        self.fetch_diff_file_lists(ctx);
-                        self.navigate_to(0, ctx);
+                        self.fetch_review_order_lists(ctx);
+                        // Diff file lists are fetched at startup in parallel;
+                        // navigate once both file list and git status are ready.
+                        self.try_initial_navigation(ctx);
                     }
                 }
 
@@ -445,6 +502,11 @@ impl CodeReviewApp {
                     self.schedule_file_poll(ctx);
                 } else {
                     self.scan_complete = true;
+                    if self.pending_head_review_order.is_none()
+                        && self.pending_branch_review_order.is_none()
+                    {
+                        self.fetch_review_order_lists(ctx);
+                    }
                 }
             }
             AsyncData::Error(_err) => {
@@ -636,26 +698,132 @@ impl CodeReviewApp {
         }
     }
 
+    fn review_order_for_scope(&self) -> &ReviewOrderCache {
+        match self.file_scope {
+            FileScope::ChangedBranch => &self.branch_review_order,
+            FileScope::ChangedHead | FileScope::All => &self.head_review_order,
+        }
+    }
+
+    fn sort_paths_by_review_order(paths: &mut [String], order: &ReviewOrderCache) {
+        paths.sort_by(|a, b| {
+            let a_rank = order
+                .file_rank
+                .get(a.as_str())
+                .copied()
+                .unwrap_or(usize::MAX);
+            let b_rank = order
+                .file_rank
+                .get(b.as_str())
+                .copied()
+                .unwrap_or(usize::MAX);
+            a_rank.cmp(&b_rank).then(a.cmp(b))
+        });
+    }
+
+    fn sort_functions_for_path(
+        functions: &mut [FunctionInfo],
+        path: &str,
+        order: &ReviewOrderCache,
+    ) {
+        let Some(rank) = order.function_rank.get(path) else {
+            return;
+        };
+
+        functions.sort_by(|a, b| {
+            let a_rank = rank.get(&a.start_line).copied().unwrap_or(usize::MAX);
+            let b_rank = rank.get(&b.start_line).copied().unwrap_or(usize::MAX);
+            a_rank.cmp(&b_rank).then(a.start_line.cmp(&b.start_line))
+        });
+    }
+
+    fn apply_review_order_to_current_functions(&mut self, ctx: &egui::Context) {
+        let Some(selected_path) = self.selected_path.clone() else {
+            return;
+        };
+
+        let focused_start = match &self.content {
+            FileContent::Ready { functions, .. } => functions
+                .get(self.focused_function)
+                .map(|function| function.start_line),
+            _ => None,
+        };
+
+        let order = self.review_order_for_scope().clone();
+        if let FileContent::Ready {
+            jobs,
+            highlights,
+            functions,
+        } = &mut self.content
+        {
+            Self::sort_functions_for_path(functions, &selected_path, &order);
+
+            if functions.is_empty() {
+                self.focused_function = 0;
+            } else {
+                self.focused_function = focused_start
+                    .and_then(|start| {
+                        functions
+                            .iter()
+                            .position(|function| function.start_line == start)
+                    })
+                    .unwrap_or(0)
+                    .min(functions.len().saturating_sub(1));
+            }
+
+            let focus = focus_range(functions, self.focused_function);
+            *jobs = code_viewer::prepare(
+                highlights_for_theme(highlights, ctx.theme()),
+                focus,
+                theme::unfocused_code_for(ctx.theme()),
+            );
+            self.apply_function_scroll(self.focused_function);
+            self.refresh_focused_relations(ctx);
+        }
+    }
+
     /// Rebuild `filtered_paths` from the current scope and changed-file lists.
     fn rebuild_filtered_paths(&mut self) {
+        let order = self.review_order_for_scope().clone();
         let changed = match self.file_scope {
             FileScope::ChangedHead => &self.head_changed,
             FileScope::ChangedBranch => &self.branch_changed,
             FileScope::All => {
-                self.filtered_paths = self.flat_paths.clone();
+                let mut paths = self.flat_paths.clone();
+                Self::sort_paths_by_review_order(&mut paths, &order);
+                self.filtered_paths = paths;
                 return;
             }
         };
-        self.filtered_paths = self
+
+        let changed_set: HashSet<&str> = changed.iter().map(String::as_str).collect();
+        let mut filtered_paths: Vec<String> = self
             .flat_paths
             .iter()
-            .filter(|p| changed.contains(p))
+            .filter(|path| changed_set.contains(path.as_str()))
             .cloned()
             .collect();
+        Self::sort_paths_by_review_order(&mut filtered_paths, &order);
+        self.filtered_paths = filtered_paths;
+    }
+
+    /// Navigate to the first filtered file once both the file list and git
+    /// status are known. Called from both `poll_file_list` and the diff-file
+    /// pollers so whichever resolves last triggers the navigation.
+    fn try_initial_navigation(&mut self, ctx: &egui::Context) {
+        if !self.needs_initial_navigation {
+            return;
+        }
+        // Need files loaded AND git status determined.
+        if self.known_file_count == 0 || self.is_git_repo.is_none() {
+            return;
+        }
+        self.needs_initial_navigation = false;
+        self.navigate_to(0, ctx);
     }
 
     /// Kick off fetches for the HEAD- and branch-changed file lists.
-    fn fetch_diff_file_lists(&mut self, ctx: &egui::Context) {
+    pub fn fetch_diff_file_lists(&mut self, ctx: &egui::Context) {
         // HEAD changed files
         {
             let shared: SharedAsync<DiffFilesResponse> = shared_loading();
@@ -699,6 +867,38 @@ impl CodeReviewApp {
                 },
             );
         }
+    }
+
+    /// Kick off fetches for the HEAD- and branch-priority orderings.
+    pub fn fetch_review_order_lists(&mut self, ctx: &egui::Context) {
+        self.fetch_review_order(DiffMode::Head, ctx);
+        self.fetch_review_order(DiffMode::Branch, ctx);
+    }
+
+    fn fetch_review_order(&mut self, mode: DiffMode, ctx: &egui::Context) {
+        let shared: SharedAsync<ReviewOrderResponse> = shared_loading();
+        match mode {
+            DiffMode::Head => self.pending_head_review_order = Some(Arc::clone(&shared)),
+            DiffMode::Branch => self.pending_branch_review_order = Some(Arc::clone(&shared)),
+        }
+
+        let mode_param = match mode {
+            DiffMode::Head => "head",
+            DiffMode::Branch => "branch",
+        };
+        let url = format!("/api/review-order?mode={mode_param}");
+        let ctx = ctx.clone();
+
+        ehttp::fetch(ehttp::Request::get(&url), move |result| {
+            let value = match result {
+                Ok(response) => serde_json::from_slice::<ReviewOrderResponse>(&response.bytes)
+                    .map(AsyncData::Loaded)
+                    .unwrap_or_else(|e| AsyncData::Error(format!("Parse error: {e}"))),
+                Err(err) => AsyncData::Error(err),
+            };
+            *shared.lock().unwrap() = value;
+            ctx.request_repaint();
+        });
     }
 
     /// Fetch diff data for the given file path and current diff mode.
@@ -758,7 +958,7 @@ impl CodeReviewApp {
     }
 
     /// Poll the HEAD changed-files fetch.
-    fn poll_pending_head_files(&mut self) {
+    fn poll_pending_head_files(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.pending_head_files.clone() else {
             return;
         };
@@ -784,6 +984,7 @@ impl CodeReviewApp {
             AsyncData::Loading => unreachable!(),
         }
         self.pending_head_files = None;
+        self.try_initial_navigation(ctx);
     }
 
     /// Poll the branch changed-files fetch.
@@ -807,6 +1008,54 @@ impl CodeReviewApp {
             AsyncData::Loading => unreachable!(),
         }
         self.pending_branch_files = None;
+    }
+
+    /// Poll the HEAD review-order fetch.
+    fn poll_pending_head_review_order(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_head_review_order.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                self.head_review_order = ReviewOrderCache::from_response(resp);
+                self.rebuild_filtered_paths();
+                if self.file_scope != FileScope::ChangedBranch {
+                    self.apply_review_order_to_current_functions(ctx);
+                }
+            }
+            AsyncData::Error(_) => {}
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_head_review_order = None;
+    }
+
+    /// Poll the branch review-order fetch.
+    fn poll_pending_branch_review_order(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_branch_review_order.clone() else {
+            return;
+        };
+        let mut guard = pending.lock().unwrap();
+        if matches!(*guard, AsyncData::Loading) {
+            return;
+        }
+
+        match std::mem::replace(&mut *guard, AsyncData::Loading) {
+            AsyncData::Loaded(resp) => {
+                self.branch_review_order = ReviewOrderCache::from_response(resp);
+                self.rebuild_filtered_paths();
+                if self.file_scope == FileScope::ChangedBranch {
+                    self.apply_review_order_to_current_functions(ctx);
+                }
+            }
+            AsyncData::Error(_) => {}
+            AsyncData::Loading => unreachable!(),
+        }
+        self.pending_branch_review_order = None;
     }
 
     fn render_quick_view_window(&mut self, ctx: &egui::Context) {
@@ -1287,8 +1536,10 @@ impl eframe::App for CodeReviewApp {
         self.poll_pending_relations();
         self.poll_pending_quick_view(ctx);
         self.poll_pending_diff();
-        self.poll_pending_head_files();
+        self.poll_pending_head_files(ctx);
         self.poll_pending_branch_files();
+        self.poll_pending_head_review_order(ctx);
+        self.poll_pending_branch_review_order(ctx);
 
         // When navigating backwards, clamp focused_function to the last function.
         if self.focused_function == usize::MAX
@@ -1410,6 +1661,7 @@ impl eframe::App for CodeReviewApp {
                         if scope != self.file_scope {
                             self.file_scope = scope;
                             self.rebuild_filtered_paths();
+                            self.apply_review_order_to_current_functions(ctx);
                             // Re-fetch diff for current file with the new mode
                             if let Some(path) = self.selected_path.clone() {
                                 self.fetch_diff(&path, ctx);
@@ -1549,12 +1801,12 @@ impl eframe::App for CodeReviewApp {
                     self.scroll_generation,
                     scroll_y,
                     func_name.as_deref(),
-                    self.current_diff.as_ref().map(|data| {
-                        code_viewer::DiffOverlay {
+                    self.current_diff
+                        .as_ref()
+                        .map(|data| code_viewer::DiffOverlay {
                             data,
                             focus: diff_focus.clone(),
-                        }
-                    }),
+                        }),
                 );
             }
             (Some(_), FileContent::Error(err)) => {
