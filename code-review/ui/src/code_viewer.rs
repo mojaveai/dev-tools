@@ -3,7 +3,7 @@ use std::ops::Range;
 use egui::text::LayoutJob;
 use egui::{Color32, FontId, Rect, RichText, ScrollArea, TextFormat, Ui, Vec2};
 
-use crate::state::{DiffData, LineStatus, StyledSpan};
+use crate::state::{DiffData, FunctionInfo, LineStatus, StyledSpan};
 use crate::theme;
 
 /// Row height used for virtual scrolling.  We zero out `item_spacing.y` inside
@@ -132,6 +132,8 @@ pub struct DiffOverlay<'a> {
 /// subtle backgrounds (green = added, yellow = modified).  Diff
 /// highlighting is restricted to the overlay's `focus` range (the active
 /// function); pass `None` to highlight all lines.
+///
+/// Returns the clicked code line index (0-based), if any.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     ui: &mut Ui,
@@ -141,7 +143,8 @@ pub fn render(
     scroll_y: Option<f32>,
     function_label: Option<&str>,
     diff: Option<DiffOverlay<'_>>,
-) {
+    functions: Option<&[FunctionInfo]>,
+) -> Option<usize> {
     let has_diff = diff.is_some();
     let (diff_data, focus) = match &diff {
         Some(ov) => (Some(ov.data), ov.focus.as_ref()),
@@ -149,6 +152,13 @@ pub fn render(
     };
     let display_rows = build_display_rows(jobs.len(), diff_data, focus);
     let total_rows = display_rows.len();
+    let mut clicked_line = None;
+    let function_ranges = functions.map(|items| {
+        items
+            .iter()
+            .map(|function| function.start_line..function.end_line)
+            .collect::<Vec<_>>()
+    });
 
     ui.vertical(|ui| {
         // File path header, optionally with focused function name
@@ -166,6 +176,16 @@ pub fn render(
                         .size(12.0)
                         .strong()
                         .monospace(),
+                );
+            }
+            if function_ranges
+                .as_ref()
+                .is_some_and(|ranges| !ranges.is_empty())
+            {
+                ui.label(
+                    RichText::new("Click within a function to open quick preview")
+                        .color(theme::accent(ui))
+                        .size(10.5),
                 );
             }
         });
@@ -205,6 +225,23 @@ pub fn render(
 
                 match display_rows[i] {
                     DisplayRow::Code(line_idx) => {
+                        let is_clickable = function_ranges
+                            .as_ref()
+                            .is_some_and(|ranges| ranges.iter().any(|range| range.contains(&line_idx)));
+
+                        let row_rect = Rect::from_min_max(
+                            egui::pos2(ui.clip_rect().min.x, row_top),
+                            egui::pos2(ui.clip_rect().max.x, row_top + ROW_HEIGHT),
+                        );
+
+                        let line_click_response = is_clickable.then(|| {
+                            ui.interact(
+                                row_rect,
+                                ui.make_persistent_id(("code-line-click", path, line_idx)),
+                                egui::Sense::click(),
+                            )
+                        });
+
                         // Paint diff background and gutter BEFORE the text
                         // so the source remains visible on top.
                         // Only highlight lines within the focused function.
@@ -244,8 +281,27 @@ pub fn render(
                             }
                         }
 
-                        // Draw text on top of the background
+                        if line_click_response
+                            .as_ref()
+                            .is_some_and(egui::Response::hovered)
+                        {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                egui::CornerRadius::ZERO,
+                                theme::focus_fill(ui).gamma_multiply(0.4),
+                            );
+                        }
+
                         ui.label(jobs[line_idx].clone());
+
+                        if let Some(response) = line_click_response {
+                            let response = response
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text("Open quick preview");
+                            if response.clicked() {
+                                clicked_line = Some(line_idx);
+                            }
+                        }
                     }
                     DisplayRow::Deleted(section_idx, line_idx) => {
                         let diff = diff_data.expect("Deleted rows only exist with diff data");
@@ -289,6 +345,7 @@ pub fn render(
             }
         });
     });
+    clicked_line
 }
 
 fn build_layout_job(spans: &[StyledSpan], code_font: &FontId) -> LayoutJob {

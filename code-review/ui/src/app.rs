@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use eframe::Frame;
@@ -104,6 +104,25 @@ impl ReviewOrderCache {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ReviewTask {
+    done: bool,
+    text: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FunctionTaskBucket {
+    name: String,
+    start_line: usize,
+    tasks: Vec<ReviewTask>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FileTaskBucket {
+    file_tasks: Vec<ReviewTask>,
+    function_tasks: BTreeMap<usize, FunctionTaskBucket>,
+}
+
 pub struct CodeReviewApp {
     /// In-flight file list fetch — polled each frame.
     pending_file_list: Option<SharedAsync<FilesResponse>>,
@@ -170,6 +189,8 @@ pub struct CodeReviewApp {
     /// Deferred until both the file list and git status are known,
     /// so the first file shown respects the active filter.
     needs_initial_navigation: bool,
+    /// Review checklist entries grouped by file and function.
+    review_tasks: BTreeMap<String, FileTaskBucket>,
 }
 
 impl CodeReviewApp {
@@ -210,6 +231,7 @@ impl CodeReviewApp {
             branch_review_order: ReviewOrderCache::default(),
             is_git_repo: None,
             needs_initial_navigation: true,
+            review_tasks: BTreeMap::new(),
         }
     }
 
@@ -669,6 +691,23 @@ impl CodeReviewApp {
             }),
             _ => None,
         }
+    }
+
+    fn function_ref_at_line(&self, line: usize) -> Option<FunctionRef> {
+        let path = self.selected_path.as_ref()?;
+        let FileContent::Ready { functions, .. } = &self.content else {
+            return None;
+        };
+
+        functions
+            .iter()
+            .filter(|function| (function.start_line..function.end_line).contains(&line))
+            .min_by_key(|function| function.end_line.saturating_sub(function.start_line))
+            .map(|function| FunctionRef {
+                path: path.clone(),
+                name: function.name.clone(),
+                start_line: function.start_line,
+            })
     }
 
     fn open_quick_view(&mut self, function: FunctionRef, ctx: &egui::Context) {
@@ -1317,11 +1356,13 @@ impl CodeReviewApp {
                             RichText::new(function.name.as_str())
                                 .size(12.0)
                                 .strong()
-                                .color(theme::text_primary(ui)),
+                                .underline()
+                                .color(theme::accent(ui)),
                         )
                         .sense(egui::Sense::click()),
                     )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Open quick preview");
                 open_quick_view |= name_response.clicked();
 
                 if is_test {
@@ -1350,12 +1391,14 @@ impl CodeReviewApp {
                     egui::Label::new(
                         RichText::new(format!("{}:{}", function.path, function.start_line + 1))
                             .size(10.5)
+                            .underline()
                             .monospace()
-                            .color(theme::text_muted(ui)),
+                            .color(theme::accent(ui)),
                     )
                     .sense(egui::Sense::click()),
                 )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Open quick preview");
             open_quick_view |= path_response.clicked();
         });
 
@@ -1498,6 +1541,259 @@ impl CodeReviewApp {
                         );
                     }
                 });
+    }
+
+    fn function_tasks_mut(&mut self, path: &str, function: &FunctionInfo) -> &mut Vec<ReviewTask> {
+        let file_bucket = self.review_tasks.entry(path.to_owned()).or_default();
+        let function_bucket = file_bucket
+            .function_tasks
+            .entry(function.start_line)
+            .or_insert_with(|| FunctionTaskBucket {
+                name: function.name.clone(),
+                start_line: function.start_line,
+                tasks: Vec::new(),
+            });
+        function_bucket.name = function.name.clone();
+        &mut function_bucket.tasks
+    }
+
+    fn render_task_editor(
+        ui: &mut egui::Ui,
+        id: impl std::hash::Hash,
+        tasks: &mut Vec<ReviewTask>,
+        hint_text: &str,
+    ) {
+        let mut remove_idx = None;
+
+        ui.push_id(id, |ui| {
+            if tasks.is_empty() {
+                ui.label(
+                    RichText::new("No tasks yet")
+                        .size(11.0)
+                        .color(theme::text_muted(ui)),
+                );
+            }
+
+            tasks.iter_mut().enumerate().for_each(|(index, task)| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut task.done, "");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut task.text)
+                            .hint_text(hint_text)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if ui
+                        .small_button(RichText::new("Remove").size(10.5))
+                        .on_hover_text("Delete this task")
+                        .clicked()
+                    {
+                        remove_idx = Some(index);
+                    }
+                });
+                ui.add_space(3.0);
+            });
+
+            if ui
+                .button(RichText::new("+ Add task").size(11.0))
+                .on_hover_text("Add another review task")
+                .clicked()
+            {
+                tasks.push(ReviewTask::default());
+            }
+        });
+
+        if let Some(index) = remove_idx {
+            tasks.remove(index);
+        }
+    }
+
+    fn normalized_task_text(text: &str) -> Option<String> {
+        let collapsed = text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_owned();
+        if collapsed.is_empty() {
+            None
+        } else {
+            Some(collapsed)
+        }
+    }
+
+    fn review_tasks_markdown(&self) -> String {
+        let mut markdown = String::from("# Review Tasks\n");
+        let mut has_any_task = false;
+
+        self.review_tasks.iter().for_each(|(path, file_bucket)| {
+            let file_tasks: Vec<(bool, String)> = file_bucket
+                .file_tasks
+                .iter()
+                .filter_map(|task| {
+                    Self::normalized_task_text(task.text.as_str()).map(|text| (task.done, text))
+                })
+                .collect();
+
+            let function_tasks: Vec<&FunctionTaskBucket> = file_bucket
+                .function_tasks
+                .values()
+                .filter(|bucket| {
+                    bucket
+                        .tasks
+                        .iter()
+                        .any(|task| Self::normalized_task_text(task.text.as_str()).is_some())
+                })
+                .collect();
+
+            if file_tasks.is_empty() && function_tasks.is_empty() {
+                return;
+            }
+
+            has_any_task = true;
+            markdown.push_str("\n## ");
+            markdown.push('`');
+            markdown.push_str(path.as_str());
+            markdown.push_str("`\n");
+
+            if !file_tasks.is_empty() {
+                markdown.push_str("\n### File Tasks\n");
+                file_tasks.iter().for_each(|(done, text)| {
+                    let marker = if *done { "x" } else { " " };
+                    markdown.push_str(format!("- [{marker}] {text}\n").as_str());
+                });
+            }
+
+            function_tasks.iter().for_each(|bucket| {
+                markdown.push_str(
+                    format!(
+                        "\n### `{}` (line {})\n",
+                        bucket.name.as_str(),
+                        bucket.start_line + 1
+                    )
+                    .as_str(),
+                );
+                bucket
+                    .tasks
+                    .iter()
+                    .filter_map(|task| {
+                        Self::normalized_task_text(task.text.as_str()).map(|text| (task.done, text))
+                    })
+                    .for_each(|(done, text)| {
+                        let marker = if done { "x" } else { " " };
+                        markdown.push_str(format!("- [{marker}] {text}\n").as_str());
+                    });
+            });
+        });
+
+        if !has_any_task {
+            markdown.push_str("\n_No tasks yet._\n");
+        }
+
+        markdown
+    }
+
+    fn render_review_tasks_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            RichText::new("Tasks")
+                .strong()
+                .size(14.0)
+                .color(theme::text_primary(ui)),
+        );
+        ui.add_space(4.0);
+
+        let Some(path) = self.selected_path.clone() else {
+            ui.label(
+                RichText::new("Select a file to add review tasks.")
+                    .size(11.5)
+                    .color(theme::text_muted(ui)),
+            );
+            return;
+        };
+        let focused_function = self.focused_function_info().cloned();
+
+        ui.label(
+            RichText::new(format!("File: {path}"))
+                .size(10.5)
+                .monospace()
+                .color(theme::text_muted(ui)),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("File Tasks")
+                .size(12.0)
+                .strong()
+                .color(theme::text_primary(ui)),
+        );
+        {
+            let file_tasks = &mut self
+                .review_tasks
+                .entry(path.clone())
+                .or_default()
+                .file_tasks;
+            Self::render_task_editor(
+                ui,
+                format!("file-task-editor:{path}"),
+                file_tasks,
+                "Describe a change for this file",
+            );
+        }
+
+        ui.add_space(8.0);
+        if let Some(function) = focused_function {
+            ui.label(
+                RichText::new(format!(
+                    "Function: {} (line {})",
+                    function.name,
+                    function.start_line + 1
+                ))
+                .size(12.0)
+                .strong()
+                .color(theme::text_primary(ui)),
+            );
+            let function_tasks = self.function_tasks_mut(path.as_str(), &function);
+            Self::render_task_editor(
+                ui,
+                format!("function-task-editor:{path}:{}", function.start_line),
+                function_tasks,
+                "Describe a change for this function",
+            );
+        } else {
+            ui.label(
+                RichText::new("No focused function in this file.")
+                    .size(11.0)
+                    .color(theme::text_muted(ui)),
+            );
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        let markdown = self.review_tasks_markdown();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Markdown")
+                    .size(12.0)
+                    .strong()
+                    .color(theme::text_primary(ui)),
+            );
+            if ui
+                .small_button(RichText::new("Copy").size(10.5))
+                .on_hover_text("Copy markdown to clipboard")
+                .clicked()
+            {
+                ui.ctx().copy_text(markdown.clone());
+            }
+        });
+
+        let mut preview = markdown;
+        ui.add(
+            egui::TextEdit::multiline(&mut preview)
+                .code_editor()
+                .desired_width(f32::INFINITY)
+                .desired_rows(10)
+                .interactive(false),
+        );
     }
 }
 
@@ -1791,35 +2087,65 @@ impl eframe::App for CodeReviewApp {
             None
         };
 
-        // Central panel: code viewer
-        CentralPanel::default().show(ctx, |ui| match (&self.selected_path, &self.content) {
-            (Some(path), FileContent::Ready { jobs, .. }) => {
-                code_viewer::render(
-                    ui,
-                    jobs,
-                    path,
-                    self.scroll_generation,
-                    scroll_y,
-                    func_name.as_deref(),
-                    self.current_diff
-                        .as_ref()
-                        .map(|data| code_viewer::DiffOverlay {
-                            data,
-                            focus: diff_focus.clone(),
-                        }),
-                );
+        // Central panel: code viewer + task editor.
+        CentralPanel::default().show(ctx, |ui| {
+            let task_panel_height = 260.0;
+            let gap = 8.0;
+            let code_height = (ui.available_height() - task_panel_height - gap).max(120.0);
+            let mut clicked_code_line = None;
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), code_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| match (&self.selected_path, &self.content) {
+                    (
+                        Some(path),
+                        FileContent::Ready {
+                            jobs, functions, ..
+                        },
+                    ) => {
+                        clicked_code_line = code_viewer::render(
+                            ui,
+                            jobs,
+                            path,
+                            self.scroll_generation,
+                            scroll_y,
+                            func_name.as_deref(),
+                            self.current_diff
+                                .as_ref()
+                                .map(|data| code_viewer::DiffOverlay {
+                                    data,
+                                    focus: diff_focus.clone(),
+                                }),
+                            Some(functions),
+                        );
+                    }
+                    (Some(_), FileContent::Error(err)) => {
+                        ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+                    }
+                    (Some(_), FileContent::Empty) => {
+                        ui.centered_and_justified(|ui| {
+                            ui.spinner();
+                        });
+                    }
+                    _ => {
+                        code_viewer::render_empty(ui, self.zen_mode);
+                    }
+                },
+            );
+            if let Some(line) = clicked_code_line
+                && let Some(function) = self.function_ref_at_line(line)
+            {
+                self.open_quick_view(function, ctx);
             }
-            (Some(_), FileContent::Error(err)) => {
-                ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
-            }
-            (Some(_), FileContent::Empty) => {
-                ui.centered_and_justified(|ui| {
-                    ui.spinner();
-                });
-            }
-            _ => {
-                code_viewer::render_empty(ui, self.zen_mode);
-            }
+
+            ui.add_space(gap);
+            ui.separator();
+            ui.add_space(6.0);
+
+            egui::ScrollArea::vertical()
+                .id_salt("review_tasks_panel")
+                .show(ui, |ui| self.render_review_tasks_panel(ui));
         });
 
         self.render_quick_view_window(ctx);
