@@ -1,0 +1,32 @@
+[project]
+name = "benchmarking"
+version = "0.1.0"
+description = "Benchmarking utilities collected in dev-tools"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=14.3.3",
+    "torch>=2.10.0",
+    "torchaudio>=2.10.0",
+    "torchvision>=0.25.0",
+    "vllm @ https://github.com/vllm-project/vllm/releases/download/v0.17.1/vllm-0.17.1+cu130-cp38-abi3-manylinux_2_35_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+[project.scripts]
+vllm-online-benchmark = "benchmarking.vllm_online_benchmark:main"
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+torchaudio = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
