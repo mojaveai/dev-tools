@@ -23,20 +23,43 @@ for c in curl tar; do
     command -v "$c" >/dev/null 2>&1 || die "required command missing: $c"
 done
 
+# Single-quote a value for safe embedding in a generated command string.
+_q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
 run_provisioner() {
     _dir=$1; shift
     chmod +x "$_dir/provision.sh" 2>/dev/null || true
+
     # stdin here is the pipe carrying this script, so hand the provisioner the
-    # real terminal when there is one -- codex login needs to prompt.
-    # Test that /dev/tty can actually be opened -- the device node exists in
-    # many containers where opening it fails with ENXIO. The probe runs in a
-    # subshell because a redirection failure on a special builtin is fatal in
-    # POSIX shells (dash is /bin/sh on Debian and Ubuntu).
-    if ( true < /dev/tty ) 2>/dev/null; then
-        REPO_DIR="$_dir" "$_dir/provision.sh" "$@" < /dev/tty
-    else
+    # real terminal when there is one -- Tailscale approval and codex login both
+    # need to prompt. Test that /dev/tty can actually be OPENED: the device node
+    # exists in many containers where opening it fails with ENXIO. The probe runs
+    # in a subshell because a redirection failure on a special builtin is fatal
+    # in POSIX shells (dash is /bin/sh on Debian and Ubuntu).
+    if ! ( true < /dev/tty ) 2>/dev/null; then
         REPO_DIR="$_dir" "$_dir/provision.sh" --non-interactive "$@" < /dev/null
+        return $?
     fi
+
+    # Provisioning over a mobile SSH session outlives the connection when it
+    # runs inside tmux: a dropped link leaves the run going, and reconnecting
+    # reattaches to it rather than restarting from scratch.
+    if [ "${DEVTOOLS_NO_TMUX:-0}" != "1" ] && [ -z "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+        _cmd="REPO_DIR=$(_q "$_dir") $(_q "$_dir/provision.sh")"
+        for _a in "$@"; do _cmd="$_cmd $(_q "$_a")"; done
+        # Hold the pane open so the summary survives the command exiting.
+        _cmd="$_cmd; printf '\n[provisioning finished - press enter to close]'; read -r _"
+        printf 'bootstrap: running inside tmux session "dev-tools" (survives disconnects)\n'
+        printf '           reattach with: tmux attach -t dev-tools\n\n'
+        if tmux new-session -A -s dev-tools "$_cmd" < /dev/tty; then
+            return 0
+        fi
+        # tmux could not start (unwritable socket dir, restricted container).
+        # Provisioning still matters more than the session wrapper.
+        printf '\nbootstrap: tmux unavailable, continuing without it\n\n' >&2
+    fi
+
+    REPO_DIR="$_dir" "$_dir/provision.sh" "$@" < /dev/tty
 }
 
 # Already running from a checkout (git clone, or a previous install): use it.

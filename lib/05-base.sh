@@ -49,23 +49,35 @@ base_pkg_for() {
 
 mod_base() {
     ensure_dirs
-    _want='curl git jq tar keyctl'
+    # Required: nothing else works without these.
+    _req='curl git jq tar python3'
+    # Optional: keyctl keeps the pass-cli key in the kernel keyring instead of on
+    # disk; tmux lets a run over a mobile link survive a dropped connection.
+    _opt='keyctl tmux'
+
     _missing=''
-    for c in $_want; do
+    for c in $_req $_opt; do
         have "$c" || _missing="$_missing $c"
     done
-    # python3 is required by the config-merge helpers.
-    have python3 || _missing="$_missing python3"
+    [ -z "$_missing" ] && { note "all present"; return "$RC_OK"; }
 
-    [ -z "$_missing" ] && { note "curl git jq tar keyctl python3 present"; return "$RC_OK"; }
+    _missing_req=''
+    for c in $_req; do have "$c" || _missing_req="$_missing_req $c"; done
 
     if ! can_privileged; then
-        warn "missing:$_missing -- and no root/sudo to install them"
-        note "missing:$_missing (no privileges)"
+        if [ -n "$_missing_req" ]; then
+            err "missing required:$_missing_req -- and no root/sudo to install them"
+            note "missing:$_missing_req (no privileges)"
+            return 1
+        fi
+        warn "optional tools unavailable and no root/sudo to install them:$_missing"
+        note "optional missing:$_missing"
         return "$RC_SKIP"
     fi
 
-    _pm=$(pkg_manager) || { note "no known package manager"; return "$RC_SKIP"; }
+    _pm=$(pkg_manager) || {
+        [ -n "$_missing_req" ] && { note "no known package manager"; return 1; }
+        note "no known package manager"; return "$RC_SKIP"; }
     pkg_refresh_once
     _pkgs=''
     for c in $_missing; do
@@ -73,11 +85,17 @@ mod_base() {
     done
     info "installing:$_pkgs"
     # shellcheck disable=SC2086
-    pkg_install $_pkgs || { err "package install failed"; return 1; }
+    pkg_install $_pkgs || warn "package install reported an error"
 
+    _still_req=''
+    for c in $_req; do have "$c" || _still_req="$_still_req $c"; done
+    if [ -n "$_still_req" ]; then
+        err "still missing after install:$_still_req"
+        note "missing:$_still_req"
+        return 1
+    fi
     _still=''
-    for c in $_missing; do have "$c" || _still="$_still $c"; done
-    [ -n "$_still" ] && warn "still missing after install:$_still"
-    note "installed:$_pkgs"
+    for c in $_opt; do have "$c" || _still="$_still $c"; done
+    note "installed:$_pkgs${_still:+ (optional still missing:$_still)}"
     return "$RC_UPDATED"
 }

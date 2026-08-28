@@ -1,8 +1,15 @@
 #!/bin/sh
 # Tailscale: install, join the tailnet, enable Tailscale SSH.
+#
+# This is the root of trust. On a fresh machine there is no secret yet, so the
+# join is interactive: tailscale prints a login URL, you approve it from a
+# browser you are already signed into, and the tailnet then vouches for this
+# machine when it asks for everything else.
 
 TS_TAGS="${DEVTOOLS_TS_TAGS:-tag:dev}"
 TS_HOSTNAME="${DEVTOOLS_TS_HOSTNAME:-$(hostname 2>/dev/null | cut -d. -f1)}"
+# Long enough to unlock a phone, open the link and approve.
+TS_AUTH_TIMEOUT="${DEVTOOLS_TS_AUTH_TIMEOUT:-300s}"
 
 ts_state() {
     tailscale status --json 2>/dev/null | jq -r '.BackendState // "NoState"' 2>/dev/null || echo Unknown
@@ -51,6 +58,48 @@ ts_ensure_daemon() {
     return 1
 }
 
+# Non-interactive join, when an OAuth client secret is already available.
+ts_up_with_secret() {
+    _kf=$(mktemp "${TMPDIR:-/tmp}/tskey.XXXXXX") || return 1
+    chmod 600 "$_kf"
+    printf '%s?ephemeral=false&preauthorized=true\n' "$TS_OAUTH_SECRET" > "$_kf"
+    # --auth-key=file: keeps the secret out of ps output.
+    run_privileged tailscale up \
+        --auth-key="file:$_kf" \
+        --advertise-tags="$TS_TAGS" \
+        --hostname="$TS_HOSTNAME" \
+        --ssh --accept-routes --timeout=90s
+    _rc=$?
+    rm -f "$_kf"
+    return $_rc
+}
+
+# Interactive join: prints a URL to approve. This is the normal path on a new
+# machine, and the one that works from a phone -- the URL is tappable in a
+# mobile SSH client, unlike a QR code you would have to scan with the same
+# device you are reading it on.
+ts_up_interactive() {
+    printf '\n'
+    printf '%s  Tailscale needs you to approve this machine.%s\n' "$C_BLD" "$C_RESET"
+    printf '  Open the link below and approve; provisioning continues automatically.\n'
+    printf '  Waiting up to %s.\n\n' "$TS_AUTH_TIMEOUT"
+
+    # Tags require a tagOwners entry granting your user the right to apply them.
+    # If that is missing the join fails, so fall back to a user-owned node.
+    if run_privileged tailscale up \
+        --advertise-tags="$TS_TAGS" \
+        --hostname="$TS_HOSTNAME" \
+        --ssh --accept-routes --timeout="$TS_AUTH_TIMEOUT"
+    then
+        return 0
+    fi
+
+    warn "join with $TS_TAGS failed; retrying without tags (check tagOwners in your ACL)"
+    run_privileged tailscale up \
+        --hostname="$TS_HOSTNAME" \
+        --ssh --accept-routes --timeout="$TS_AUTH_TIMEOUT"
+}
+
 mod_tailscale() {
     _rc="$RC_OK"
     ts_install
@@ -71,31 +120,14 @@ mod_tailscale() {
     fi
 
     if [ "$_state" != "Running" ]; then
-        secret_have TS_OAUTH_SECRET || {
-            note "not joined and TS_OAUTH_SECRET unavailable"; return "$RC_SKIP"; }
-
-        # An OAuth client secret is used in the auth-key position. Unlike an auth
-        # key it never expires (auth keys cap at 90 days and would break this
-        # bootstrap quarterly). Two consequences must be overridden: tags are
-        # mandatory, and OAuth-registered nodes default to ephemeral -- which
-        # would delete this machine from the tailnet shortly after it goes idle.
-        _kf=$(mktemp "${TMPDIR:-/tmp}/tskey.XXXXXX") || return 1
-        chmod 600 "$_kf"
-        # shellcheck disable=SC2064
-        trap "rm -f '$_kf'" EXIT INT TERM
-        printf '%s?ephemeral=false&preauthorized=true\n' "$TS_OAUTH_SECRET" > "$_kf"
-
-        info "joining tailnet as ${TS_HOSTNAME} (${TS_TAGS})"
-        # --auth-key=file: keeps the secret out of ps output.
-        # --timeout is essential: unattended, the default blocks forever.
-        run_privileged tailscale up \
-            --auth-key="file:$_kf" \
-            --advertise-tags="$TS_TAGS" \
-            --hostname="$TS_HOSTNAME" \
-            --ssh \
-            --accept-routes \
-            --timeout=90s || { rm -f "$_kf"; err "tailscale up failed"; return 1; }
-        rm -f "$_kf"; trap - EXIT INT TERM
+        if secret_have TS_OAUTH_SECRET; then
+            ts_up_with_secret || { err "tailscale up failed"; return 1; }
+        elif [ "${DEVTOOLS_NONINTERACTIVE:-0}" != "1" ]; then
+            ts_up_interactive || { err "tailscale login was not completed"; return 1; }
+        else
+            note "not joined; needs either TS_OAUTH_SECRET or an interactive run"
+            return "$RC_SKIP"
+        fi
         _rc="$RC_UPDATED"
     elif ! ts_ssh_enabled; then
         # Converge SSH on an already-joined node without bouncing the connection.
