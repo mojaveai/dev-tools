@@ -27,7 +27,7 @@ export PROTON_PASS_SESSION_DIR
 PAT_VAULTS="${DEVTOOLS_PAT_VAULTS:-codex}"
 PAT_EXPIRATION="${DEVTOOLS_PAT_EXPIRATION:-3m}"
 PAT_NAME="${DEVTOOLS_PAT_NAME:-dev-$(hostname 2>/dev/null | cut -d. -f1)}"
-PASS_LOGIN_TIMEOUT="${DEVTOOLS_PASS_LOGIN_TIMEOUT:-300}"
+PASS_LOGIN_TIMEOUT="${DEVTOOLS_PASS_LOGIN_TIMEOUT:-600}"
 
 # pass-cli keeps its database key in the *kernel keyring*. A key minted by one
 # login belongs to that login's session keyring and is gone in any later shell --
