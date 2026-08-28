@@ -26,7 +26,7 @@ to approve two links — Tailscale, then Proton Pass — and does the rest itsel
 
   https://account.proton.me/desktop/login?app=pass#payload=...
 
-    updated  vault unlocked (interactive)
+    updated  scoped to 1 vault(s), expires in 3m
 ```
 
 **This repository is public and contains no secrets** — only the *names* of vault
@@ -54,7 +54,7 @@ It is built for a mobile SSH client (Termius, Blink):
 | Codex | standalone install, keymap, login |
 | Keymaps | **Enter inserts a newline, Tab submits** — in both CLIs |
 | Agent skills | everything in `skills/`, linked into both CLIs |
-| pass-cli | installed, vault unlocked by approving a link |
+| pass-cli | installed, left holding a scoped per-machine token |
 | gh | current upstream release, authenticated, wired into git |
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
@@ -64,17 +64,39 @@ It is built for a mobile SSH client (Termius, Blink):
 
 ```
 tap the Tailscale link   -> machine joins the tailnet (tag:dev), SSH on
-tap the Proton Pass link -> vault unlocked
-                         -> GitHub PAT, Claude token, ElevenLabs, ... everything else
+tap the Proton Pass link -> full-vault session, briefly
+                         -> mint dev-<host>, scoped + expiring
+                         -> log out of the full session
+                         -> re-auth with the scoped token   <- what persists
+                         -> GitHub PAT, Claude token, ... everything else
 ```
 
-Two approvals, both from a browser you are already signed into. Nothing is typed,
-nothing is stored on the phone, and no credential is committed here.
+Two approvals, both from a browser you are already signed into. Nothing is typed
+and nothing is stored on the phone.
 
-There is no secrets server to run. Proton Pass *is* the secret store, and
-`pass-cli login` is its approve-a-link unlock — so the only server involved is
-Proton's. Revoking a machine is removing the Tailscale device and, if you want to
-be thorough, its Proton session.
+**The full-vault session lasts seconds.** It exists only to mint a scoped token,
+then it is explicitly logged out. What remains on the machine is a viewer-role
+token limited to the vaults you name, expiring in three months, named after the
+host — so `pass-cli pat list` shows which machine each token belongs to, and
+revoking one box touches no other.
+
+When that token expires, the next interactive run rotates it automatically:
+escalate once, mint a fresh one, drop back down.
+
+There is no secrets server to run. Proton Pass *is* the secret store and
+`pass-cli login` is its approve-a-link unlock, so the only server involved is
+Proton's.
+
+### Tuning the scope
+
+```sh
+DEVTOOLS_PAT_VAULTS="dev infra"   # vaults the token may read (default: dev)
+DEVTOOLS_PAT_EXPIRATION=1m        # 1d 1w 1m 3m 6m 1y   (default: 3m)
+DEVTOOLS_PAT_NAME=laptop          # default: dev-<hostname>
+```
+
+Grants are `viewer`. If none succeed the run fails rather than dropping to a
+token that cannot read anything.
 
 ## Re-running it
 
@@ -122,8 +144,8 @@ appended twice, and removals propagate.
 | `pass://dev/g2/elevenlabs` | ElevenLabs key (g2 voice) |
 | `pass://dev/g2/openrouter` | OpenRouter key (optional) |
 
-**2. Nothing.** The vault unlocks by approving a link. A scoped
-`pass-cli pat create` token is only needed for unattended runs (below).
+**2. A vault named `dev`** holding the items above — that is what the scoped
+token is granted access to. Change it with `DEVTOOLS_PAT_VAULTS`.
 
 **3. `claude setup-token`** — run once, ever, on any machine. It opens a browser,
 prints a ~1-year token, and saves it nowhere. Put it in the vault.
@@ -166,12 +188,14 @@ curl -fsSL .../bootstrap.sh | \
 `TS_OAUTH_SECRET` is deliberately *not* in `secrets.map`: Tailscale runs before the
 vault is unlocked, so it cannot come from the vault.
 
-A token also changes how the vault key is stored. With a token, each access runs
-in a fresh kernel keyring and re-authenticates — nothing persists. An interactive
-login has no token to replay, so its session is kept on a file-backed key
-(`PROTON_PASS_KEY_PROVIDER=fs`) that survives between runs: you approve once per
-machine rather than once per run, at the cost of the key sitting beside the data
-it encrypts.
+Supplying a token skips the escalation entirely — useful in CI, where there is no
+one to approve a link.
+
+The two modes store the vault key differently. With a token, each access runs in a
+fresh kernel keyring and re-authenticates, so nothing persists. The brief
+escalation needs one session to survive across several processes, so it runs on a
+file-backed key (`PROTON_PASS_KEY_PROVIDER=fs`); once the scoped token is in
+place, accesses go back to the keyring-per-call form.
 
 ## Notes on the pieces
 
