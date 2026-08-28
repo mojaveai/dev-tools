@@ -7,10 +7,8 @@ and to keep it there.
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
 
-Nothing to paste, no secret to carry. On a new machine the script installs
-Tailscale and prints a login URL; you approve it from a browser you are already
-signed into, and the tailnet then vouches for the machine when it asks for
-everything else.
+Nothing to paste, no secret to carry, nothing self-hosted. A new machine asks you
+to approve two links — Tailscale, then Proton Pass — and does the rest itself.
 
 ```
 ==> tailscale
@@ -21,8 +19,14 @@ everything else.
   To authenticate, visit: https://login.tailscale.com/a/4f2c9a1b
 
     updated  Running @ 100.x.y.z, SSH on
-==> bootstrap token
-    updated  token fetched over the tailnet
+==> pass-cli
+
+  Proton Pass needs you to approve this machine.
+  Open the link it prints below and sign in.
+
+  https://account.proton.me/desktop/login?app=pass#payload=...
+
+    updated  vault unlocked (interactive)
 ```
 
 **This repository is public and contains no secrets** — only the *names* of vault
@@ -50,7 +54,7 @@ It is built for a mobile SSH client (Termius, Blink):
 | Codex | standalone install, keymap, login |
 | Keymaps | **Enter inserts a newline, Tab submits** — in both CLIs |
 | Agent skills | everything in `skills/`, linked into both CLIs |
-| pass-cli | installed and authenticated from the tailnet-delivered token |
+| pass-cli | installed, vault unlocked by approving a link |
 | gh | current upstream release, authenticated, wired into git |
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
@@ -59,24 +63,18 @@ It is built for a mobile SSH client (Termius, Blink):
 ## How trust flows
 
 ```
-you approve a URL from your phone
-        |
-        v
-  machine joins the tailnet  (tag:dev)
-        |
-        v
-  asks dev-secrets for the bootstrap token
-  (server authorises by `tailscale whois`, not a shared secret)
-        |
-        v
-  pass-cli unlocks the vault
-        |
-        v
-  GitHub PAT, Claude token, ElevenLabs, ... everything else
+tap the Tailscale link   -> machine joins the tailnet (tag:dev), SSH on
+tap the Proton Pass link -> vault unlocked
+                         -> GitHub PAT, Claude token, ElevenLabs, ... everything else
 ```
 
-Nothing sensitive is typed, stored on the phone, or committed here. Revoking a
-machine is removing the device from your tailnet.
+Two approvals, both from a browser you are already signed into. Nothing is typed,
+nothing is stored on the phone, and no credential is committed here.
+
+There is no secrets server to run. Proton Pass *is* the secret store, and
+`pass-cli login` is its approve-a-link unlock — so the only server involved is
+Proton's. Revoking a machine is removing the Tailscale device and, if you want to
+be thorough, its Proton session.
 
 ## Re-running it
 
@@ -113,29 +111,6 @@ appended twice, and removals propagate.
 ./provision.sh --list                          # step names
 ```
 
-## Setting up the secrets endpoint
-
-`server/secrets-server.py` hands out one thing — the Proton Pass token — to
-machines already on your tailnet. Run it on any always-on box:
-
-```sh
-DEV_SECRETS_PAT_FILE=~/.secrets/proton-pass.pat \
-DEV_SECRETS_ALLOW_TAGS=tag:dev \
-DEV_SECRETS_ALLOW_USERS=you@example.com \
-  ./server/secrets-server.py
-```
-
-It binds to that node's tailnet address, so it is never exposed on a public
-interface, and every request is resolved with `tailscale whois`. Anything that
-cannot be resolved to an allowed tag or user is refused and logged. WireGuard
-already encrypts the traffic, so it speaks plain HTTP and needs no certificate.
-
-Name that host **`dev-secrets`** in Tailscale and clients find it by MagicDNS with
-no configuration. Otherwise set `DEVTOOLS_SECRETS_URL` on the client.
-
-The token is only ever handed to a device you personally approved onto the
-tailnet, and revoking that device revokes its access.
-
 ## One-time setup
 
 **1. Vault items** matching `config/secrets.map`:
@@ -147,9 +122,8 @@ tailnet, and revoking that device revokes its access.
 | `pass://dev/g2/elevenlabs` | ElevenLabs key (g2 voice) |
 | `pass://dev/g2/openrouter` | OpenRouter key (optional) |
 
-**2. A Proton Pass PAT** — `pass-cli pat create --name dev-bootstrap` — placed in
-the secrets server's `DEV_SECRETS_PAT_FILE`. It never touches a client machine
-except over the tailnet.
+**2. Nothing.** The vault unlocks by approving a link. A scoped
+`pass-cli pat create` token is only needed for unattended runs (below).
 
 **3. `claude setup-token`** — run once, ever, on any machine. It opens a browser,
 prints a ~1-year token, and saves it nowhere. Put it in the vault.
@@ -189,8 +163,15 @@ curl -fsSL .../bootstrap.sh | \
   TS_OAUTH_SECRET='...' PROTON_PASS_PERSONAL_ACCESS_TOKEN='pst_...' sh -s -- --non-interactive
 ```
 
-`TS_OAUTH_SECRET` is deliberately *not* in `secrets.map`: Tailscale is the root of
-trust and runs before the vault is reachable, so it cannot come from the vault.
+`TS_OAUTH_SECRET` is deliberately *not* in `secrets.map`: Tailscale runs before the
+vault is unlocked, so it cannot come from the vault.
+
+A token also changes how the vault key is stored. With a token, each access runs
+in a fresh kernel keyring and re-authenticates — nothing persists. An interactive
+login has no token to replay, so its session is kept on a file-backed key
+(`PROTON_PASS_KEY_PROVIDER=fs`) that survives between runs: you approve once per
+machine rather than once per run, at the cost of the key sitting beside the data
+it encrypts.
 
 ## Notes on the pieces
 
@@ -237,7 +218,6 @@ lib/common.sh         logging, privilege, managed blocks, JSON/TOML merge
 lib/NN-*.sh           one module per concern, run in numeric order
 config/               settings, keybindings, keymap, secrets.map (names only)
 skills/               agent skills, symlinked into both CLIs
-server/               tailnet secrets endpoint (runs on one always-on host)
 ```
 
 To add a tool, drop a `lib/NN-thing.sh` defining `mod_thing`, and add one `step`

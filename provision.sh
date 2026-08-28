@@ -104,7 +104,7 @@ Usage: provision.sh [options]
   --debug            verbose
   -h, --help         this help
 
-Steps: mod_base mod_tailscale mod_bootstrap_secret mod_passcli mod_secrets
+Steps: mod_base mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
        mod_uv mod_ripgrep mod_g2
 EOF
@@ -129,7 +129,6 @@ printf '%sdev-tools%s  provisioning %s (%s, %s)\n\n' \
 
 step "base packages"   mod_base
 step "tailscale"       mod_tailscale
-step "bootstrap token" mod_bootstrap_secret
 step "pass-cli"        mod_passcli
 step "secrets"         mod_secrets
 step "shell env"       mod_shell
