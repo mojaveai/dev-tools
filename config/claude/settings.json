@@ -1,0 +1,7 @@
+{
+  "theme": "auto",
+  "autoUpdatesChannel": "stable",
+  "permissions": {
+    "defaultMode": "acceptEdits"
+  }
+}

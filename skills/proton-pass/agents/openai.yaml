@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proton Pass"
+  short_description: "Safely access and inject Proton Pass secrets"
+  default_prompt: "Use $proton-pass to safely retrieve a credential for this task."

@@ -1,0 +1,11 @@
+# Merged into ~/.codex/config.toml; other keys in that file are preserved.
+# Codex uses hyphens for modifiers (ctrl-enter), unlike Claude Code's plus.
+
+# A headless box has no keyring daemon; "file" avoids a startup failure.
+cli_auth_credentials_store = "file"
+
+[tui.keymap.editor]
+insert_newline = ["enter"]
+
+[tui.keymap.composer]
+submit = ["tab"]
