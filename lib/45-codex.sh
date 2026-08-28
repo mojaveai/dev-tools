@@ -12,7 +12,7 @@ mod_codex() {
         info "installing codex"
         _tmp=$(mktemp "${TMPDIR:-/tmp}/codex.XXXXXX") || return 1
         download 'https://chatgpt.com/codex/install.sh' "$_tmp" || { rm -f "$_tmp"; return 1; }
-        sh "$_tmp" >/dev/null 2>&1 || { rm -f "$_tmp"; err "codex install failed"; return 1; }
+        run_installer sh "$_tmp" || { rm -f "$_tmp"; note "install failed"; return 1; }
         rm -f "$_tmp"
     fi
     have codex || { err "codex not on PATH after install"; return 1; }

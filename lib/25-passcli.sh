@@ -54,11 +54,19 @@ passcli_install_or_update() {
         return 0
     fi
     info "installing pass-cli"
+    # Proton's installer is #!/bin/bash and uses bash-only syntax, so it must not
+    # be run with sh -- which is dash on Debian and Ubuntu and dies on line 80.
+    # It also requires jq, which mod_base installs.
+    have bash || { err "pass-cli's installer requires bash, which is not installed"; return 1; }
+    have jq   || { err "pass-cli's installer requires jq, which is not installed"; return 1; }
+
     _tmp=$(mktemp "${TMPDIR:-/tmp}/passcli.XXXXXX") || return 1
     download "$PASS_CLI_INSTALL_URL" "$_tmp" || { rm -f "$_tmp"; return 1; }
-    sh "$_tmp" >/dev/null 2>&1 || { rm -f "$_tmp"; return 1; }
+    run_installer bash "$_tmp" || { rm -f "$_tmp"; return 1; }
     rm -f "$_tmp"
-    have pass-cli
+
+    have pass-cli || { err "pass-cli installed but is not on PATH"; return 1; }
+    return 0
 }
 
 pass_login_interactive() {
@@ -167,7 +175,7 @@ mod_passcli() {
     _before=''
     have pass-cli && _before=$(pass-cli --version 2>/dev/null || echo '')
 
-    passcli_install_or_update || { err "pass-cli install failed"; return 1; }
+    passcli_install_or_update || { note "install failed"; return 1; }
     have pass-cli || { err "pass-cli not on PATH after install"; return 1; }
     _after=$(pass-cli --version 2>/dev/null || echo '')
 

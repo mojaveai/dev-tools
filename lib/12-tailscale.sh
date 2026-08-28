@@ -25,7 +25,11 @@ ts_install() {
     info "installing tailscale"
     _tmp=$(mktemp "${TMPDIR:-/tmp}/ts.XXXXXX") || return 1
     download 'https://tailscale.com/install.sh' "$_tmp" || { rm -f "$_tmp"; return 1; }
-    run_privileged sh "$_tmp" >/dev/null 2>&1 || { rm -f "$_tmp"; return 1; }
+    if is_root; then
+        run_installer sh "$_tmp" || { rm -f "$_tmp"; return 1; }
+    else
+        run_installer sudo "sh" "$_tmp" || { rm -f "$_tmp"; return 1; }
+    fi
     rm -f "$_tmp"
     have tailscale
 }

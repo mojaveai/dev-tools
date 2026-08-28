@@ -128,6 +128,21 @@ managed_block() {
 # Did the managed block change? Compare before/after to decide OK vs UPDATED.
 file_digest() { [ -f "$1" ] && cksum < "$1" || echo absent; }
 
+# Run an installer quietly, but show why it failed rather than swallowing it.
+# A bare "install failed" on a fresh box is close to undebuggable.
+#   run_installer <interpreter> <script> [args...]
+run_installer() {
+    _interp=$1; _script=$2; shift 2
+    _ilog=$(mktemp "${TMPDIR:-/tmp}/devtools-install.XXXXXX") || return 1
+    if "$_interp" "$_script" "$@" >"$_ilog" 2>&1; then
+        rm -f "$_ilog"; return 0
+    fi
+    err "installer failed ($_interp $(basename "$_script")):"
+    sed -e 's/\x1b\[[0-9;]*m//g' "$_ilog" | tail -8 | sed 's/^/      /' >&2
+    rm -f "$_ilog"
+    return 1
+}
+
 # --- config merging ----------------------------------------------------------
 # Merge our keys into a user-owned config without clobbering their other keys.
 # Both helpers are no-ops that report success when nothing changed.

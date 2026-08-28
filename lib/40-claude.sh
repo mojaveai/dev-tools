@@ -14,7 +14,7 @@ mod_claude() {
         info "installing claude code"
         _tmp=$(mktemp "${TMPDIR:-/tmp}/claude.XXXXXX") || return 1
         download 'https://claude.ai/install.sh' "$_tmp" || { rm -f "$_tmp"; return 1; }
-        bash "$_tmp" >/dev/null 2>&1 || { rm -f "$_tmp"; err "claude install failed"; return 1; }
+        run_installer bash "$_tmp" || { rm -f "$_tmp"; note "install failed"; return 1; }
         rm -f "$_tmp"
     fi
     have claude || { err "claude not on PATH after install"; return 1; }

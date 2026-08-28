@@ -15,7 +15,7 @@ mod_uv() {
     download 'https://astral.sh/uv/install.sh' "$_tmp" || { rm -f "$_tmp"; return 1; }
     # We own PATH via the managed .bashrc block; without this the installer
     # re-appends to the shell profile on every self-update.
-    UV_NO_MODIFY_PATH=1 sh "$_tmp" >/dev/null 2>&1 || { rm -f "$_tmp"; err "uv install failed"; return 1; }
+    UV_NO_MODIFY_PATH=1 run_installer sh "$_tmp" || { rm -f "$_tmp"; note "install failed"; return 1; }
     rm -f "$_tmp"
     have uv || { err "uv not on PATH after install"; return 1; }
     note "uv $(uv --version 2>/dev/null | awk '{print $2}')"
