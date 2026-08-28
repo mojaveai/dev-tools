@@ -20,7 +20,7 @@ PAT_FILE="$STATE_DIR/proton-pass.pat"
 PAT_ID_FILE="$STATE_DIR/proton-pass.pat.id"
 
 # Vaults the scoped token may read. Space-separated.
-PAT_VAULTS="${DEVTOOLS_PAT_VAULTS:-dev}"
+PAT_VAULTS="${DEVTOOLS_PAT_VAULTS:-codex}"
 PAT_EXPIRATION="${DEVTOOLS_PAT_EXPIRATION:-3m}"
 PAT_NAME="${DEVTOOLS_PAT_NAME:-dev-$(hostname 2>/dev/null | cut -d. -f1)}"
 PASS_LOGIN_TIMEOUT="${DEVTOOLS_PASS_LOGIN_TIMEOUT:-300}"

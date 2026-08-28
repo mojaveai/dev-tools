@@ -90,7 +90,7 @@ Proton's.
 ### Tuning the scope
 
 ```sh
-DEVTOOLS_PAT_VAULTS="dev infra"   # vaults the token may read (default: dev)
+DEVTOOLS_PAT_VAULTS="codex infra" # vaults the token may read (default: codex)
 DEVTOOLS_PAT_EXPIRATION=1m        # 1d 1w 1m 3m 6m 1y   (default: 3m)
 DEVTOOLS_PAT_NAME=laptop          # default: dev-<hostname>
 ```
@@ -137,15 +137,15 @@ appended twice, and removals propagate.
 
 **1. Vault items** matching `config/secrets.map`:
 
-| Reference | What |
-|---|---|
-| `pass://dev/github/pat` | GitHub PAT, scopes `repo`, `read:org`, `gist` |
-| `pass://dev/anthropic/claude-code-token` | output of `claude setup-token` |
-| `pass://dev/g2/elevenlabs` | ElevenLabs key (g2 voice) |
-| `pass://dev/g2/openrouter` | OpenRouter key (optional) |
+| Item (vault `codex`) | Field | What |
+|---|---|---|
+| `GitHub PAT` | `API Key` | scopes `repo`, `read:org`, `gist` |
+| `Claude Code Token` | `API Key` | output of `claude setup-token` |
+| `ElevenLabs` | `API Key` | g2 voice — already exists |
+| `openrouter` | `API Key` | optional — already exists |
 
-**2. A vault named `dev`** holding the items above — that is what the scoped
-token is granted access to. Change it with `DEVTOOLS_PAT_VAULTS`.
+**2. The `codex` vault** is what the scoped token is granted access to. Change it
+with `DEVTOOLS_PAT_VAULTS`.
 
 **3. `claude setup-token`** — run once, ever, on any machine. It opens a browser,
 prints a ~1-year token, and saves it nowhere. Put it in the vault.
