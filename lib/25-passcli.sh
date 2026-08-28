@@ -18,6 +18,10 @@
 PASS_CLI_INSTALL_URL='https://proton.me/download/pass-cli/install.sh'
 PAT_FILE="$STATE_DIR/proton-pass.pat"
 PAT_ID_FILE="$STATE_DIR/proton-pass.pat.id"
+# Pinned rather than left to the default, so the escalation and the scoped phase
+# demonstrably operate on the same store -- and so it can be wiped between them.
+PROTON_PASS_SESSION_DIR="${PROTON_PASS_SESSION_DIR:-$STATE_DIR/proton-pass-session}"
+export PROTON_PASS_SESSION_DIR
 
 # Vaults the scoped token may read. Space-separated.
 PAT_VAULTS="${DEVTOOLS_PAT_VAULTS:-codex}"
@@ -46,7 +50,23 @@ pass_session_run() {
     fi
 }
 
-pass_authenticated() { echo 'exit 0' | pass_session_run 2>/dev/null; }
+pass_authenticated() { echo 'exit 0' | pass_session_run >/dev/null 2>&1; }
+
+# Same check, but reports what pass-cli actually said. Used on the failure path,
+# where a silent 'did not authenticate' is close to undiagnosable.
+pass_auth_diagnose() {
+    _dlog=$(mktemp "${TMPDIR:-/tmp}/passauth.XXXXXX") || return 1
+    if [ "$(pass_mode)" = pat ] && have keyctl; then
+        keyctl session - /bin/sh -c 'pass-cli info || pass-cli login' >"$_dlog" 2>&1
+    else
+        PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
+            /bin/sh -c 'pass-cli info || pass-cli login' >"$_dlog" 2>&1
+    fi
+    err "pass-cli reported:"
+    sed -e 's/\x1b\[[0-9;]*m//g' -e "s/pst_[A-Za-z0-9_-]*::[A-Za-z0-9_-]*/pst_<redacted>/g" \
+        "$_dlog" | tail -10 | sed 's/^/      /' >&2
+    rm -f "$_dlog"
+}
 
 passcli_install_or_update() {
     if have pass-cli; then
@@ -124,6 +144,12 @@ print(tok); print(pid)
         MINTED_TOKEN=$(printf '%s' "$_json" | grep -oE 'pst_[A-Za-z0-9_-]+::[A-Za-z0-9_-]+' | head -1)
     fi
     [ -n "$MINTED_TOKEN" ] || return 1
+    # Shape only -- a truncated or malformed capture is the failure mode that
+    # would otherwise look like a rejected credential.
+    case "$MINTED_TOKEN" in
+        pst_*::*) dbg "minted token: ${#MINTED_TOKEN} chars, well-formed" ;;
+        *) err "minted token is malformed (${#MINTED_TOKEN} chars)"; return 1 ;;
+    esac
 
     _granted=0
     for _v in $PAT_VAULTS; do
@@ -159,6 +185,13 @@ pass_escalate_then_drop() {
     PROTON_PASS_KEY_PROVIDER=fs pass-cli logout --force >/dev/null 2>&1 || \
         warn "logout reported an error; the session may still be active remotely"
 
+    # The interactive phase encrypted the local database with a file-backed key.
+    # The scoped phase runs in a fresh kernel keyring, where that key does not
+    # exist, so pass-cli would meet a database it cannot decrypt and refuse to
+    # re-authenticate. Clearing the store makes the scoped login start clean --
+    # and also leaves nothing behind from the full-vault session.
+    rm -rf "$PROTON_PASS_SESSION_DIR"
+
     umask 077
     printf '%s\n' "$MINTED_TOKEN" > "$PAT_FILE"; chmod 600 "$PAT_FILE"
     [ -n "$MINTED_ID" ] && { printf '%s\n' "$MINTED_ID" > "$PAT_ID_FILE"; chmod 600 "$PAT_ID_FILE"; }
@@ -167,7 +200,13 @@ pass_escalate_then_drop() {
     export PROTON_PASS_PERSONAL_ACCESS_TOKEN
     MINTED_TOKEN=''
 
-    pass_authenticated || { err "the scoped token did not authenticate"; return 1; }
+    if ! pass_authenticated; then
+        err "the scoped token did not authenticate"
+        pass_auth_diagnose
+        warn "the token exists in your account as '$PAT_NAME'; delete it with:"
+        warn "  pass-cli pat delete --personal-access-token-name '$PAT_NAME'"
+        return 1
+    fi
     return 0
 }
 
