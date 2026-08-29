@@ -15,7 +15,9 @@ mod_secrets() {
         note "vault unavailable"; return "$RC_SKIP"; }
     [ -f "$SECRETS_MAP" ] || { note "no secrets.map"; return "$RC_SKIP"; }
 
-    _names=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$SECRETS_MAP" | cut -d= -f1 | tr -d ' ')
+    # Space-separated, not newline: these are interpolated into a single
+    # generated command, and embedded newlines would split it into several.
+    _names=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$SECRETS_MAP" | cut -d= -f1 | tr -d ' ' | tr '\n' ' ')
     [ -n "$_names" ] || { note "secrets.map empty"; return "$RC_SKIP"; }
 
     _dir=$(mktemp -d "${TMPDIR:-/tmp}/devtools-secrets.XXXXXX") || return 1
@@ -27,15 +29,20 @@ mod_secrets() {
     chmod 600 "$_dir/refs.env"
 
     # pass-cli resolves pass:// references from an --env-file (note: --env-file,
-    # not --env). Emit only the names we asked for, shell-quoted, so nothing ever
-    # lands on a command line or in ps output.
+    # not --env). The child writes the values to a 0600 file directly rather than
+    # to stdout: Proton masks secrets on output streams, so anything printed
+    # comes back as "<concealed by Proton Pass>" and is useless. Nothing lands on
+    # a command line or in ps output either way.
     _emit='import os,sys,shlex
-for n in sys.argv[1:]:
-    print("%s=%s" % (n, shlex.quote(os.environ.get(n, ""))))'
+out = sys.argv[1]
+fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as fh:
+    for n in sys.argv[2:]:
+        fh.write("%s=%s\n" % (n, shlex.quote(os.environ.get(n, ""))))'
 
-    if ! printf 'pass-cli run --env-file %s -- python3 -c %s %s > %s\n' \
-            "$(quote "$_dir/refs.env")" "$(quote "$_emit")" "$_names" \
-            "$(quote "$_dir/resolved.env")" | pass_session_run
+    if ! printf 'pass-cli run --env-file %s -- python3 -c %s %s %s\n' \
+            "$(quote "$_dir/refs.env")" "$(quote "$_emit")" \
+            "$(quote "$_dir/resolved.env")" "$_names" | pass_session_run
     then
         err "pass-cli could not resolve secrets"
         note "resolution failed"

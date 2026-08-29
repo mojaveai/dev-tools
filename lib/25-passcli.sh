@@ -60,9 +60,26 @@ keyctl_usable() {
 
 pass_session_run() {
     _snippet=$(cat)
-    if [ "$(pass_mode)" = pat ] && keyctl_usable; then
-        keyctl session - /bin/sh -c "pass-cli info >/dev/null 2>&1 || pass-cli login >/dev/null 2>&1 || exit 90; $_snippet"
+    if [ "$(pass_mode)" = pat ]; then
+        # A token can always re-establish its own session, so attempt a login
+        # whenever there is not already one -- in a fresh keyring where the
+        # kernel keyring is usable, on a file-backed key where it is not. Both
+        # paths must try to log in: after dropping the full-vault session there
+        # is deliberately no session left to find.
+        # Token sessions are agent sessions, and pass-cli refuses item and run
+        # commands unless a reason is declared for the audit trail.
+        PROTON_PASS_AGENT_REASON="${PROTON_PASS_AGENT_REASON:-Provisioning the development environment for this machine.}"
+        export PROTON_PASS_AGENT_REASON
+        _pre='pass-cli info >/dev/null 2>&1 || pass-cli login >/dev/null 2>&1 || exit 90;'
+        if keyctl_usable; then
+            keyctl session - /bin/sh -c "$_pre $_snippet"
+        else
+            PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
+                /bin/sh -c "$_pre $_snippet"
+        fi
     else
+        # Interactive: the session was established by a human approving a link
+        # and cannot be recreated unattended, so never attempt a login here.
         PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
             /bin/sh -c "pass-cli info >/dev/null 2>&1 || exit 90; $_snippet"
     fi
