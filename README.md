@@ -213,6 +213,12 @@ own outbound traffic does not transparently route over the tailnet — so the
 secrets fetch goes through the SOCKS5 proxy on `localhost:1055`, using `socks5h`
 so MagicDNS names resolve through the tunnel.
 
+**Personal preferences are not shipped.** `config/claude/settings.json` carries
+only `autoUpdatesChannel`. Things like `permissions.defaultMode`, `theme` or
+`effortLevel` are yours to set, and a provisioner that silently overwrote them
+would be worse than one that left them alone. The keymap lives in
+`keybindings.json`, which is provisioning intent rather than preference.
+
 **Keymaps.** Claude Code reads `~/.claude/keybindings.json` and uses `+` for
 modifiers; Codex reads `[tui.keymap.*]` in `config.toml` and uses `-`. A `+` in
 the Codex file fails at startup with `data did not match any variant of untagged
