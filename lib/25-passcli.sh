@@ -40,9 +40,27 @@ pass_mode() {
     if [ -n "${PROTON_PASS_PERSONAL_ACCESS_TOKEN:-}" ]; then echo pat; else echo interactive; fi
 }
 
+# `keyctl` being installed is not the same as it working. Container runtimes
+# commonly deny the keyring syscalls (Docker's default seccomp profile does), and
+# `keyctl session -` then fails with "Operation not permitted" -- which surfaces
+# as an authentication failure and looks like a bad credential. Probe once.
+keyctl_usable() {
+    case "${_DEVTOOLS_KEYCTL_OK:-}" in
+        yes) return 0 ;;
+        no)  return 1 ;;
+    esac
+    if have keyctl && keyctl session - /bin/true >/dev/null 2>&1; then
+        _DEVTOOLS_KEYCTL_OK=yes
+    else
+        _DEVTOOLS_KEYCTL_OK=no
+        have keyctl && warn "the kernel keyring is unavailable here (containerised?); using a file-backed key"
+    fi
+    [ "$_DEVTOOLS_KEYCTL_OK" = yes ]
+}
+
 pass_session_run() {
     _snippet=$(cat)
-    if [ "$(pass_mode)" = pat ] && have keyctl; then
+    if [ "$(pass_mode)" = pat ] && keyctl_usable; then
         keyctl session - /bin/sh -c "pass-cli info >/dev/null 2>&1 || pass-cli login >/dev/null 2>&1 || exit 90; $_snippet"
     else
         PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
@@ -56,7 +74,7 @@ pass_authenticated() { echo 'exit 0' | pass_session_run >/dev/null 2>&1; }
 # where a silent 'did not authenticate' is close to undiagnosable.
 pass_auth_diagnose() {
     _dlog=$(mktemp "${TMPDIR:-/tmp}/passauth.XXXXXX") || return 1
-    if [ "$(pass_mode)" = pat ] && have keyctl; then
+    if [ "$(pass_mode)" = pat ] && keyctl_usable; then
         keyctl session - /bin/sh -c 'pass-cli info || pass-cli login' >"$_dlog" 2>&1
     else
         PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
