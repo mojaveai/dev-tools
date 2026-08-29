@@ -38,7 +38,10 @@ out = sys.argv[1]
 fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w") as fh:
     for n in sys.argv[2:]:
-        fh.write("%s=%s\n" % (n, shlex.quote(os.environ.get(n, ""))))'
+        # Trim surrounding whitespace: a credential never meaningfully starts or
+        # ends with it, and a stray space from a paste would otherwise be
+        # invisible and break authentication far downstream.
+        fh.write("%s=%s\n" % (n, shlex.quote(os.environ.get(n, "").strip())))'
 
     if ! printf 'pass-cli run --env-file %s -- python3 -c %s %s %s\n' \
             "$(quote "$_dir/refs.env")" "$(quote "$_emit")" \
