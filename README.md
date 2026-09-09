@@ -7,6 +7,16 @@ and to keep it there.
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
 
+Include the **shareable browser pilot** with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh -s -- --with-browser
+```
+
+Already set up? The same command checks and repairs the installation, preserving
+authentication and browser profiles. Browser installation and private viewer
+access are reported separately; see [the browser runbook](docs/browser.md).
+
 Nothing to paste, no secret to carry, nothing self-hosted. A new machine asks you
 to approve two links — Tailscale, then Proton Pass — and does the rest itself.
 
@@ -59,6 +69,7 @@ It is built for a mobile SSH client (Termius, Blink):
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
 | g2-terminal | installed from its private release |
+| Shared browser (pilot) | `--with-browser`: native Playwright sessions with private live viewer URLs; [setup and operations](docs/browser.md) |
 
 ## How trust flows
 
@@ -131,6 +142,8 @@ appended twice, and removals propagate.
 ./provision.sh --skip "mod_g2"                 # all but this
 ./provision.sh --non-interactive               # never prompt
 ./provision.sh --list                          # step names
+./provision.sh --with-browser                  # pilot: native browser + live viewer
+./provision.sh --with-mac-browser https://mac.example.ts.net/mcp  # optional, approval-gated
 ```
 
 ## One-time setup

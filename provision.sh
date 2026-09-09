@@ -101,12 +101,15 @@ Usage: provision.sh [options]
   --skip  "fn ..."   skip these step functions
   --list             list step functions and exit
   --non-interactive  never prompt (codex login will be reported, not run)
+  --with-browser     install native shareable browser sessions (pilot)
+  --with-mac-browser URL  also configure optional Mac MCP; owner approval required
+  --mac-browser-proxy URL outbound HTTP proxy for userspace Tailscale on Linux
   --debug            verbose
   -h, --help         this help
 
 Steps: mod_base mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
-       mod_uv mod_ripgrep mod_g2
+       mod_uv mod_ripgrep mod_g2 mod_browser
 EOF
 }
 
@@ -117,6 +120,14 @@ while [ $# -gt 0 ]; do
         --skip)  SKIP=$2; shift 2 ;;
         --list)  usage; exit 0 ;;
         --non-interactive) DEVTOOLS_NONINTERACTIVE=1; export DEVTOOLS_NONINTERACTIVE; shift ;;
+        --with-browser) DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_BROWSER_ENABLED; shift ;;
+        --with-mac-browser)
+            [ $# -ge 2 ] || { err "--with-mac-browser needs an HTTPS endpoint"; exit 2; }
+            DEVTOOLS_BROWSER_ENABLED=1; DEVTOOLS_MAC_BROWSER_ENDPOINT=$2
+            export DEVTOOLS_BROWSER_ENABLED DEVTOOLS_MAC_BROWSER_ENDPOINT; shift 2 ;;
+        --mac-browser-proxy)
+            [ $# -ge 2 ] || { err "--mac-browser-proxy needs a URL"; exit 2; }
+            DEVTOOLS_MAC_BROWSER_PROXY=$2; export DEVTOOLS_MAC_BROWSER_PROXY; shift 2 ;;
         --debug) DEVTOOLS_DEBUG=1; export DEVTOOLS_DEBUG; shift ;;
         -h|--help) usage; exit 0 ;;
         *) err "unknown option: $1"; usage; exit 2 ;;
@@ -135,6 +146,7 @@ step "shell env"       mod_shell
 step "github cli"      mod_github
 step "claude code"     mod_claude
 step "codex"           mod_codex
+step "browser"         mod_browser
 step "agent skills"    mod_skills
 step "ssh keys"        mod_sshid
 step "uv"              mod_uv
