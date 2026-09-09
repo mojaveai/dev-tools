@@ -1,6 +1,7 @@
 """Identity boundaries and the no-reauth provisioning contract."""
 
 import importlib.util
+import json
 import os
 import subprocess
 import tempfile
@@ -106,14 +107,20 @@ codex() {
     esac
 }
 codex_account_check() { return "$TEST_ACCOUNT_RESULT"; }
+node() { echo "unexpected credential login" >&2; exit 99; }
 mod_codex
 """
         with tempfile.TemporaryDirectory() as temp:
             for status, expected_exit in [(0, 0), (2, 1), (3, 1), (4, 1)]:
+                cfg = Path(temp) / "browser.json"
+                cfg.write_text(json.dumps({"codex_login_with_pass": status != 2}))
                 env = dict(
                     os.environ,
                     REPO_DIR=str(ROOT),
                     CODEX_HOME=temp,
+                    DEVTOOLS_STATE_DIR=temp,
+                    DEVTOOLS_BROWSER_CONFIG=str(cfg),
+                    DEVTOOLS_PASS_READY="1",
                     DEVTOOLS_NONINTERACTIVE="1",
                     TEST_ACCOUNT_RESULT=str(status),
                 )

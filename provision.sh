@@ -100,8 +100,9 @@ Usage: provision.sh [options]
   --only  "fn ..."   run only these step functions
   --skip  "fn ..."   skip these step functions
   --list             list step functions and exit
-  --non-interactive  never prompt (codex login will be reported, not run)
+  --non-interactive  no terminal prompts (opted-in browser login still runs)
   --with-browser     install native shareable browser sessions (pilot)
+  --with-codex-login  enable saved Proton Pass browser-assisted Codex recovery
   --viewer-policy-reviewed  acknowledge tailnet viewer access review; save once
   --with-mac-browser URL  also configure optional Mac MCP; owner approval required
   --mac-browser-proxy URL outbound HTTP proxy for userspace Tailscale on Linux
@@ -123,6 +124,7 @@ while [ $# -gt 0 ]; do
         --non-interactive) DEVTOOLS_NONINTERACTIVE=1; export DEVTOOLS_NONINTERACTIVE; shift ;;
         --with-browser) DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_BROWSER_ENABLED; shift ;;
         --viewer-policy-reviewed) DEVTOOLS_VIEWER_POLICY_REVIEWED=1; export DEVTOOLS_VIEWER_POLICY_REVIEWED; shift ;;
+        --with-codex-login) DEVTOOLS_CODEX_LOGIN_WITH_PASS=1; DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_CODEX_LOGIN_WITH_PASS DEVTOOLS_BROWSER_ENABLED; shift ;;
         --with-mac-browser)
             [ $# -ge 2 ] || { err "--with-mac-browser needs an HTTPS endpoint"; exit 2; }
             DEVTOOLS_BROWSER_ENABLED=1; DEVTOOLS_MAC_BROWSER_ENDPOINT=$2
@@ -147,8 +149,8 @@ step "secrets"         mod_secrets
 step "shell env"       mod_shell
 step "github cli"      mod_github
 step "claude code"     mod_claude
-step "codex"           mod_codex
 step "browser"         mod_browser
+step "codex"           mod_codex
 step "agent skills"    mod_skills
 step "ssh keys"        mod_sshid
 step "uv"              mod_uv

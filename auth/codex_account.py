@@ -28,7 +28,25 @@ def classify(account, expected):
     )
 
 
-def read_account(timeout=15):
+class AccountRequestError(RuntimeError):
+    def __init__(self, payload):
+        # Keep provider responses private; report only the failure category.
+        super().__init__("Codex account request failed")
+        text = json.dumps(payload).lower()
+        self.requires_login = any(
+            marker in text
+            for marker in (
+                "token_revoked",
+                "refresh_token_reused",
+                "refresh_token_expired",
+                "invalid_grant",
+                "unauthorized",
+                "401",
+            )
+        )
+
+
+def read_account(timeout=30, expected=None):
     """Use Codex's supported credential-store-independent account/read API."""
     process = subprocess.Popen(
         ["codex", "app-server", "--listen", "stdio://"],
@@ -65,7 +83,9 @@ def read_account(timeout=15):
             if not isinstance(message, dict):
                 raise TypeError("app-server response unavailable")
             if message.get("id") == request_id:
-                if "error" in message or "result" not in message:
+                if "error" in message:
+                    raise AccountRequestError(message["error"])
+                if "result" not in message:
                     raise RuntimeError("app-server rejected request")
                 return message["result"]
 
@@ -88,6 +108,28 @@ def read_account(timeout=15):
         result = response(2)
         if "account" not in result:
             raise RuntimeError("missing account field")
+        if expected and classify(result["account"], expected) == MATCH:
+            # Cached identity alone can describe a revoked token. This supported
+            # endpoint validates the account without starting a model/task.
+            send({"id": 3, "method": "account/rateLimits/read", "params": {}})
+            try:
+                response(3)
+            except AccountRequestError as exc:
+                if not exc.requires_login:
+                    raise  # Network/service errors never trigger a new login.
+                send(
+                    {
+                        "id": 4,
+                        "method": "account/read",
+                        "params": {"refreshToken": True},
+                    }
+                )
+                result = response(4)
+                if "account" not in result:
+                    raise RuntimeError("missing refreshed account field")
+                if classify(result.get("account"), expected) == MATCH:
+                    send({"id": 5, "method": "account/rateLimits/read", "params": {}})
+                    response(5)
         return result["account"]
     finally:
         # Only our own app-server group; never stop another Codex process.
@@ -116,7 +158,9 @@ def main():
     if classify(None, expected) == UNVERIFIED:
         return UNVERIFIED
     try:
-        return classify(read_account(), expected)
+        return classify(read_account(expected=expected), expected)
+    except AccountRequestError as exc:
+        return ABSENT if exc.requires_login else UNVERIFIED
     except (OSError, ValueError, RuntimeError, TimeoutError, queue.Empty, TypeError):
         return UNVERIFIED
 
