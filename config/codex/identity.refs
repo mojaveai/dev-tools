@@ -1,0 +1,2 @@
+# Expected account only; passwords and OTPs are never resolved here.
+DEVTOOLS_CODEX_VAULT_EMAIL=pass://codex/ChatGPT/email
