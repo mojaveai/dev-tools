@@ -41,6 +41,26 @@ An interrupted download/install is a failure that a rerun repairs.
   Existing servers, settings, authentication and the old `mac-chrome` server are
   preserved. Restart/reconnect the agent once to discover the added tools.
 
+## Chromium sandbox on Ubuntu
+
+Provisioning and `doctor` now launch a temporary blank browser to check sandbox
+startup, rather than just checking that executable files exist. This does not
+open or change task profiles. Healthy reruns perform the check without sudo or
+policy changes.
+
+Ubuntu's restricted user namespaces can reject downloaded Chromium with
+`No usable sandbox`. If this occurs while the Ubuntu restriction is enabled,
+provisioning installs a root-owned `/etc/apparmor.d/dev-tools-browser-<uid>`
+profile granting `userns` to the exact resolved Chromium executable path, using
+Chromium's documented `flags=(unconfined)` profile. It loads only that profile
+and checks startup again. Sudo and `apparmor_parser` are required; unavailable
+permissions or a continued failure are reported as a failed browser step.
+Neither global namespace restrictions nor Chromium's sandbox are disabled.
+The executable is user-owned, so this path exception also applies to a binary
+that the same Linux user places at that exact path. It is not a boundary against
+that user. Updating the managed Chromium version updates the owned profile when
+needed; unrelated profiles are preserved.
+
 ## First shared session
 
 ```sh

@@ -502,7 +502,19 @@ def supervise(name):
         )
         for _ in range(150):
             if stopping or any(p.poll() is not None for p in children):
-                raise BrowserError("A browser session component exited during startup")
+                failed = [
+                    f"{label} (exit {child.poll()})"
+                    for label, identity in meta["processes"].items()
+                    for child in children
+                    if child.pid == identity["pid"] and child.poll() is not None
+                ]
+                raise BrowserError(
+                    "Browser startup interrupted"
+                    if stopping
+                    else "Session startup failed: "
+                    + ", ".join(failed)
+                    + "; inspect earlier component output"
+                )
             try:
                 local_http(f"http://127.0.0.1:{meta['cdp_port']}/json/version")
                 local_http(f"http://127.0.0.1:{meta['viewer_port']}/vnc.html")
@@ -722,6 +734,9 @@ def main(argv=None):
                     "approved": cfg.get("mac_browser", {}).get("approved", False),
                 },
             }
+            from sandbox import probe
+
+            result["sandbox"] = probe(cfg.get("chromium", ""))
             try:
                 result["tailscale"] = json.loads(ts(["status", "--json"])).get(
                     "BackendState"
