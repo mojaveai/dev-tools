@@ -18,8 +18,8 @@
 PASS_CLI_INSTALL_URL='https://proton.me/download/pass-cli/install.sh'
 PAT_FILE="$STATE_DIR/proton-pass.pat"
 PAT_ID_FILE="$STATE_DIR/proton-pass.pat.id"
-# Pinned rather than left to the default, so the escalation and the scoped phase
-# demonstrably operate on the same store -- and so it can be wiped between them.
+# Keep a separate namespace from the user's normal Pass store. Authentication
+# below uses fresh temporary stores so earlier encryption keys are never reused.
 PROTON_PASS_SESSION_DIR="${PROTON_PASS_SESSION_DIR:-$STATE_DIR/proton-pass-session}"
 export PROTON_PASS_SESSION_DIR
 
@@ -58,7 +58,21 @@ keyctl_usable() {
     [ "$_DEVTOOLS_KEYCTL_OK" = yes ]
 }
 
-pass_session_run() {
+# Every PAT operation has its own encrypted database and key lifetime. Never
+# open a previous keyring's database with a new key, or reuse the human store.
+pass_session_run() (
+    if [ "$(pass_mode)" = pat ]; then
+        umask 077
+        PROTON_PASS_SESSION_DIR=$(mktemp -d "${TMPDIR:-/tmp}/devtools-pass-pat.XXXXXX") || exit 1
+        export PROTON_PASS_SESSION_DIR
+        trap 'rm -rf "$PROTON_PASS_SESSION_DIR"' EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+    fi
+    pass_session_run_inner
+)
+
+pass_session_run_inner() {
     _snippet=$(cat)
     if [ "$(pass_mode)" = pat ]; then
         # A token can always re-establish its own session, so attempt a login
@@ -71,6 +85,9 @@ pass_session_run() {
         PROTON_PASS_AGENT_REASON="${PROTON_PASS_AGENT_REASON:-Provisioning the development environment for this machine.}"
         export PROTON_PASS_AGENT_REASON
         _pre='pass-cli info >/dev/null 2>&1 || pass-cli login >/dev/null 2>&1 || exit 90;'
+        if [ "${DEVTOOLS_PASS_DIAG:-0}" = 1 ]; then
+            _pre='pass-cli info || pass-cli login || exit 90;'
+        fi
         if keyctl_usable; then
             keyctl session - /bin/sh -c "$_pre $_snippet"
         else
@@ -91,12 +108,7 @@ pass_authenticated() { echo 'exit 0' | pass_session_run >/dev/null 2>&1; }
 # where a silent 'did not authenticate' is close to undiagnosable.
 pass_auth_diagnose() {
     _dlog=$(mktemp "${TMPDIR:-/tmp}/passauth.XXXXXX") || return 1
-    if [ "$(pass_mode)" = pat ] && keyctl_usable; then
-        keyctl session - /bin/sh -c 'pass-cli info || pass-cli login' >"$_dlog" 2>&1
-    else
-        PROTON_PASS_KEY_PROVIDER="${PROTON_PASS_KEY_PROVIDER:-fs}" \
-            /bin/sh -c 'pass-cli info || pass-cli login' >"$_dlog" 2>&1
-    fi
+    printf 'exit 0\n' | DEVTOOLS_PASS_DIAG=1 pass_session_run >"$_dlog" 2>&1
     err "pass-cli reported:"
     sed -e 's/\x1b\[[0-9;]*m//g' -e "s/pst_[A-Za-z0-9_-]*::[A-Za-z0-9_-]*/pst_<redacted>/g" \
         "$_dlog" | tail -10 | sed 's/^/      /' >&2
@@ -205,7 +217,20 @@ print(tok); print(pid)
 }
 
 # Full session -> scoped session. Never leaves the full one lying around.
-pass_escalate_then_drop() {
+# Human approval and token minting share one fresh file-backed store. The
+# subshell keeps it separate from both the user's normal Pass session and any
+# stale installer database left by an interrupted/older run.
+pass_escalate_then_drop() (
+    umask 077
+    PROTON_PASS_SESSION_DIR=$(mktemp -d "${TMPDIR:-/tmp}/devtools-pass-human.XXXXXX") || exit 1
+    export PROTON_PASS_SESSION_DIR
+    trap 'rm -rf "$PROTON_PASS_SESSION_DIR"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    pass_escalate_then_drop_inner
+)
+
+pass_escalate_then_drop_inner() {
     pass_login_interactive || return 1
 
     info "minting a scoped token for this machine ($PAT_NAME, expires in $PAT_EXPIRATION)"
@@ -291,7 +316,11 @@ mod_passcli() {
 
     pass_escalate_then_drop || { note "could not establish a scoped session"; return 1; }
 
+    # The isolated approval subprocess persisted the scoped token, not its
+    # environment. Load it for subsequent modules without another human login.
+    PROTON_PASS_PERSONAL_ACCESS_TOKEN=$(cat "$PAT_FILE")
+    export PROTON_PASS_PERSONAL_ACCESS_TOKEN
     DEVTOOLS_PASS_READY=1; export DEVTOOLS_PASS_READY
-    note "scoped to ${note_granted:-?} vault(s), expires in $PAT_EXPIRATION"
+    note "scoped token ready, expires in $PAT_EXPIRATION"
     return "$RC_UPDATED"
 }
