@@ -102,6 +102,7 @@ Usage: provision.sh [options]
   --list             list step functions and exit
   --non-interactive  never prompt (codex login will be reported, not run)
   --with-browser     install native shareable browser sessions (pilot)
+  --viewer-policy-reviewed  acknowledge tailnet viewer access review; save once
   --with-mac-browser URL  also configure optional Mac MCP; owner approval required
   --mac-browser-proxy URL outbound HTTP proxy for userspace Tailscale on Linux
   --debug            verbose
@@ -121,6 +122,7 @@ while [ $# -gt 0 ]; do
         --list)  usage; exit 0 ;;
         --non-interactive) DEVTOOLS_NONINTERACTIVE=1; export DEVTOOLS_NONINTERACTIVE; shift ;;
         --with-browser) DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_BROWSER_ENABLED; shift ;;
+        --viewer-policy-reviewed) DEVTOOLS_VIEWER_POLICY_REVIEWED=1; export DEVTOOLS_VIEWER_POLICY_REVIEWED; shift ;;
         --with-mac-browser)
             [ $# -ge 2 ] || { err "--with-mac-browser needs an HTTPS endpoint"; exit 2; }
             DEVTOOLS_BROWSER_ENABLED=1; DEVTOOLS_MAC_BROWSER_ENDPOINT=$2

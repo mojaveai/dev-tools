@@ -2,6 +2,26 @@
 # Native, shareable browser sessions. Pilot is opt-in until both acceptance
 # environments pass; already-installed hosts continue to converge on reruns.
 
+# Browser sessions publish and remove their own Serve routes as the Linux user.
+# Configure this once instead of requiring sudo on every lifecycle operation.
+browser_serve_operator() {
+    have tailscale || return 0
+    [ "$(ts_state)" = Running ] || return 0
+    _browser_user=$(id -un)
+    _browser_prefs=$(tailscale debug prefs 2>/dev/null) || {
+        can_privileged || { note "Serve setup requires sudo to inspect Tailscale operator"; return 1; }
+        _browser_prefs=$(run_privileged tailscale debug prefs) || return 1
+    }
+    _browser_operator=$(printf '%s' "$_browser_prefs" | jq -r '.OperatorUser // ""') || return 1
+    [ "$_browser_operator" != "$_browser_user" ] || return 0
+    if [ -n "$_browser_operator" ]; then
+        note "Tailscale operator belongs to another user; ask the host owner to designate $_browser_user"; return 1
+    fi
+    can_privileged || { note "Serve setup requires sudo; rerun interactively to configure the browser user"; return 1; }
+    run_privileged tailscale set --operator="$_browser_user" || return 1
+    _browser_changed=1
+}
+
 mod_browser() {
     _browser_config=${DEVTOOLS_BROWSER_CONFIG:-$HOME/.config/dev-tools/browser.json}
     if [ "${DEVTOOLS_BROWSER_ENABLED:-0}" != 1 ] && [ ! -f "$_browser_config" ]; then
@@ -17,6 +37,12 @@ mod_browser() {
         ubuntu:x86_64|ubuntu:aarch64|debian:x86_64|debian:aarch64) : ;;
         *) note "unsupported native browser platform: $_browser_os/$(arch)"; return "$RC_SKIP" ;;
     esac
+    # Stay unprivileged for Chromium, but acquire sudo once for native packages,
+    # the AppArmor exception and Serve operator setup when needed.
+    if ! can_privileged && have sudo && [ "${DEVTOOLS_NONINTERACTIVE:-0}" != 1 ] && ( true < /dev/tty ) 2>/dev/null; then
+        info "browser provisioning may need sudo for host setup"
+        sudo -v </dev/tty || { note "browser host setup needs sudo"; return 1; }
+    fi
     _browser_changed=0
     _browser_missing=''
     for _browser_pkg in tigervnc-standalone-server openbox novnc websockify xauth; do
@@ -73,6 +99,7 @@ mod_browser() {
         *) note "Chromium sandbox unavailable; see diagnostic above, then rerun"; return 1 ;;
     esac
     printf '%s\n' "$_browser_want" > "$_browser_runtime/.complete"
+    browser_serve_operator || return 1
     ensure_dirs
     if [ -e "$BIN_DIR/dev-tools" ] && [ ! -L "$BIN_DIR/dev-tools" ]; then
         note "$BIN_DIR/dev-tools exists and is not a managed symlink; refusing to overwrite"; return 1

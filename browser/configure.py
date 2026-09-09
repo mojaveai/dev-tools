@@ -36,6 +36,8 @@ def configure(repo, runtime, executable):
     )
     cfg.setdefault("max_sessions", 8)
     cfg.setdefault("viewer_policy_reviewed", False)
+    if os.environ.get("DEVTOOLS_VIEWER_POLICY_REVIEWED") == "1":
+        cfg["viewer_policy_reviewed"] = True
     cfg.setdefault("viewer_https_port", 443)
     if os.environ.get("DEVTOOLS_MAC_BROWSER_ENDPOINT"):
         endpoint = validate_mac_endpoint(os.environ["DEVTOOLS_MAC_BROWSER_ENDPOINT"])
