@@ -160,11 +160,12 @@ appended twice, and removals propagate.
 | `ChatGPT` | `Email` | intended Codex account; read separately via `config/codex/identity.refs` |
 
 Codex accepts an existing login only when its ChatGPT email matches the vault
-item. Missing, mismatched, or unverifiable identities fail the Codex step without
-replacing its credentials. A matching login is reused without prompting or a
-forced token refresh. New machines use `codex login --device-auth` and are checked
-again after login. The check confirms the account identity, not live subscription
-entitlement or token validity at the OpenAI service.
+item. Mismatched or unverifiable identities fail without replacing credentials.
+Missing or rejected credentials use the configured recovery path below. A matching login is checked online without a model call and reused without
+prompting. A rejected access token gets one supported refresh attempt; a healthy
+session does not force refresh. New machines use `codex login --device-auth` and are checked
+again after login. The check confirms identity and live account access. Service/network failures
+are reported as unverified and do not trigger reauthentication.
 
 Override the target using `DEVTOOLS_CODEX_EXPECTED_EMAIL`, or point
 `DEVTOOLS_CODEX_IDENTITY_REFS` at a names-only reference file outside the installed
@@ -175,10 +176,35 @@ Identity verification currently covers Codex; it does not certify the accounts
 used by other installed services.
 
 The [official Codex authentication flow](https://learn.chatgpt.com/docs/auth.md)
-supports browser/device approval, not direct password/TOTP CLI login. Those vault
-fields can support a separately supervised browser login, but unattended login-page
-automation is not part of provisioning. Device auth may need enabling in ChatGPT
-security settings; ordinary `codex login` remains a manual alternative.
+supports browser/device approval, not direct password/TOTP CLI login. Enable
+browser-assisted recovery once with `--with-codex-login` (also installs the browser).
+```sh
+curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh -s -- --with-codex-login
+```
+
+The preference is saved on this host. When a matching account's token cannot be
+refreshed, setup opens Codex's official OAuth flow in a temporary shared browser
+and resolves Email, Password and a fresh TOTP from `codex/ChatGPT` only as each
+field is needed. It checks the login email against the configured account before
+using the password. Values stay in short-lived child processes; they are not
+written into shell configuration or logs. Login profiles are deleted after the
+attempt. Use `DEVTOOLS_CODEX_LOGIN_REFS_DIR` for names-only login reference files
+outside the install tree when using a different vault item.
+
+Automation is bounded and limited to OpenAI login origins. If approval, CAPTCHA,
+SSO, or a changed page prevents completion, the existing viewer handoff is used
+and waits up to ten minutes; it never bypasses challenges or loops password
+attempts. Healthy sessions skip this path entirely. Network failures and wrong
+accounts do not initiate a new login. Tests cover synthetic forms; real OpenAI
+login pages may change. Codex's saved authentication remains the standard OAuth
+cache, with normal refresh handling.
+
+After verified authentication, setup checks matching same-user Codex Unix daemons.
+If auth/config files are newer than a supported daemon, it queues a single SIGHUP
+reload: Codex drains active turns, then a detached helper restores its launch.
+Stdio servers and other users/homes are left alone. Unchanged reruns do not restart
+servers, and no forced termination is used. A daemon controlled by another
+manager is not duplicated if that manager has already restarted it.
 
 **2. The `codex` vault** is what the scoped token is granted access to. Change it
 with `DEVTOOLS_PAT_VAULTS`.

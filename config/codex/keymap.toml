@@ -9,3 +9,6 @@ insert_newline = ["enter"]
 
 [tui.keymap.composer]
 submit = ["tab"]
+
+# Queue defaults to Tab in recent Codex versions; keep it distinct from Submit.
+queue = ["alt-enter"]

@@ -35,6 +35,8 @@ def configure(repo, runtime, executable):
         novnc="/usr/share/novnc",
     )
     cfg.setdefault("max_sessions", 8)
+    if os.environ.get("DEVTOOLS_CODEX_LOGIN_WITH_PASS") == "1":
+        cfg["codex_login_with_pass"] = True
     cfg.setdefault("viewer_policy_reviewed", False)
     if os.environ.get("DEVTOOLS_VIEWER_POLICY_REVIEWED") == "1":
         cfg["viewer_policy_reviewed"] = True
