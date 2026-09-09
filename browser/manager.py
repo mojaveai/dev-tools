@@ -389,6 +389,14 @@ def start(name):
 
 
 def stop_locked(meta):
+    import handoff
+
+    pending = handoff.read(session_dir(meta["id"]))
+    if pending["status"] == "pending":
+        try:
+            handoff.finish(session_dir(meta["id"]), pending["id"], "cancelled")
+        except ValueError:
+            pass  # The viewer may have completed it concurrently.
     # Stop the owned supervisor before routes/metadata, avoiding a late write.
     supervisor = meta.get("processes", {}).get("supervisor")
     if alive(supervisor):
@@ -498,11 +506,12 @@ def supervise(name):
         launch(
             "viewer",
             [
-                cfg["websockify"],
-                "--web",
+                "/usr/bin/python3",
+                str(Path(__file__).with_name("viewer.py")),
+                str(directory),
                 cfg["novnc"],
-                f"127.0.0.1:{meta['viewer_port']}",
-                f"127.0.0.1:{meta['vnc_port']}",
+                str(meta["viewer_port"]),
+                str(meta["vnc_port"]),
             ],
         )
         for _ in range(150):
@@ -681,6 +690,16 @@ def main(argv=None):
             )
         if command == "delete-profile":
             sub.add_argument("--yes", action="store_true")
+    for command in ("request-input", "input-status", "cancel-input", "wait-input"):
+        sub = subs.add_parser(command)
+        sub.add_argument("session")
+        sub.add_argument("--json", action="store_true")
+        if command == "request-input":
+            sub.add_argument("--message", required=True)
+        if command in ("cancel-input", "wait-input"):
+            sub.add_argument("--request-id", required=True)
+        if command == "wait-input":
+            sub.add_argument("--timeout", type=int, default=60)
     subs.add_parser("list").add_argument("--json", action="store_true")
     subs.add_parser("doctor").add_argument("--json", action="store_true")
     subs.add_parser("mac-mcp")
@@ -688,6 +707,37 @@ def main(argv=None):
     subs.add_parser("revoke-mac")
     subs.add_parser("_supervise").add_argument("session")
     args = parser.parse_args(argv)
+    if args.command in ("request-input", "input-status", "cancel-input", "wait-input"):
+        import handoff
+
+        directory = session_dir(session_id(args.session))
+        if not directory.exists():
+            parser.error("Browser session does not exist")
+        try:
+            if args.command == "request-input":
+                if not status(read_session(args.session))["running"]:
+                    raise ValueError("Start the browser before requesting input")
+                result = handoff.request(directory, args.message)
+            elif args.command == "cancel-input":
+                result = handoff.finish(directory, args.request_id, "cancelled")
+            else:
+                deadline = time.monotonic() + min(
+                    max(getattr(args, "timeout", 0), 0), 60
+                )
+                while True:
+                    result = handoff.read(directory)
+                    if (
+                        args.command != "wait-input"
+                        or result["id"] != args.request_id
+                        or result["status"] != "pending"
+                        or time.monotonic() >= deadline
+                    ):
+                        break
+                    time.sleep(0.5)
+            print(json.dumps(result))
+            return
+        except ValueError as exc:
+            parser.error(str(exc))
     os.umask(0o077)
     try:
         if args.command == "_supervise":

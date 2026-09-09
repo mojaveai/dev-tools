@@ -102,11 +102,11 @@ try {
   });
   await viewer.locator('#noVNC_transition').waitFor({ state: 'hidden' });
   assert.equal(await viewer.evaluate(async () => (await import('./app/ui.js')).default.rfb.viewOnly), true);
-  // Human takeover through the actual RFB/websockify/VNC path, not CDP.
-  await viewer.evaluate(async () => {
-    const UI = (await import('./app/ui.js')).default;
-    UI.rfb.viewOnly = false;
-  });
+  // Agent handoff enables input without the human finding noVNC settings.
+  const request = command('request-input', 'live-a', '--message', 'Complete the test login');
+  await viewer.waitForFunction(() => document.querySelector('#devtools-handoff')?.textContent.includes('Your turn'));
+  await viewer.waitForFunction(async () => !(await import('./app/ui.js')).default.rfb.viewOnly);
+  assert.match(await viewer.locator('#devtools-handoff').innerText(), /Your turn/);
   // Click into the displayed application before typing, just as a person does.
   // DOM focus through CDP alone does not move focus out of Chrome's omnibox.
   const canvas = await viewer.locator('#noVNC_container canvas').boundingBox();
@@ -121,12 +121,22 @@ try {
     }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
+  // Reconnecting during handoff keeps the same pending request.
+  await viewer.reload();
+  await viewer.waitForFunction(() => document.documentElement.classList.contains('noVNC_connected'));
+  await viewer.waitForFunction(() => document.querySelector('#devtools-handoff')?.textContent.includes('Your turn'));
+  await viewer.waitForFunction(async () => !(await import('./app/ui.js')).default.rfb.viewOnly);
+  await viewer.locator('#devtools-handoff button').click();
+  await viewer.waitForFunction(async () => (await import('./app/ui.js')).default.rfb.viewOnly);
+  assert.equal(command('input-status', 'live-a').status, 'completed');
+  assert.equal(command('input-status', 'live-a').id, request.id);
   await viewer.close();
   assert.ok(command('status', 'live-a').running, 'Closing the viewer stopped automation');
   await agent.close();
   assert.equal(command('status', 'live-a').processes.browser.pid, a.processes.browser.pid);
   agent = await attach('live-a');
   assert.match(await agent.call('browser_snapshot'), /Signed in as demo/);
+
   const other = await attach('live-b');
   await other.call('browser_navigate', { url });
   assert.doesNotMatch(await other.call('browser_snapshot'), /Signed in as demo/);
@@ -147,7 +157,7 @@ try {
       assert.ok(entries.every(line => /^(127\.0\.0\.1|\[::1\]):/.test(line.split(/\s+/)[3])), `Non-loopback listener on ${port}`);
     }
   }
-  console.log(JSON.stringify({ passed: ['two isolated native desktops', 'real MCP navigation', 'noVNC view-only default', 'human login through noVNC', 'viewer disconnect survival', 'MCP reconnect survival', 'persistent login after restart', 'session-scoped cleanup', 'loopback-only listeners'], tailnet_viewer: 'not tested by this local test', state: scratch }, null, 2));
+  console.log(JSON.stringify({ passed: ['two isolated native desktops', 'real MCP navigation', 'noVNC view-only default', 'human login through noVNC', 'automatic input handoff', 'pending handoff survives refresh', 'Done restores view-only', 'viewer disconnect survival', 'MCP reconnect survival', 'persistent login after restart', 'session-scoped cleanup', 'loopback-only listeners'], tailnet_viewer: 'not tested by this local test', state: scratch }, null, 2));
 } finally {
   for (const client of clients) await client.close().catch(() => {});
   if (viewerBrowser) await viewerBrowser.close();
