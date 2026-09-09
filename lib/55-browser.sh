@@ -66,6 +66,12 @@ mod_browser() {
         }
         _browser_changed=1
     fi
+    python3 "$REPO_DIR/browser/sandbox.py" repair "$_browser_chromium"
+    case $? in
+        0) : ;;
+        10) _browser_changed=1 ;;
+        *) note "Chromium sandbox unavailable; see diagnostic above, then rerun"; return 1 ;;
+    esac
     printf '%s\n' "$_browser_want" > "$_browser_runtime/.complete"
     ensure_dirs
     if [ -e "$BIN_DIR/dev-tools" ] && [ ! -L "$BIN_DIR/dev-tools" ]; then
