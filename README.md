@@ -156,6 +156,28 @@ appended twice, and removals propagate.
 | `Claude Code Token` | `API Key` | output of `claude setup-token` |
 | `ElevenLabs` | `API Key` | g2 voice — already exists |
 | `openrouter` | `API Key` | optional — already exists |
+| `ChatGPT` | `Email` | intended Codex account; read separately via `config/codex/identity.refs` |
+
+Codex accepts an existing login only when its ChatGPT email matches the vault
+item. Missing, mismatched, or unverifiable identities fail the Codex step without
+replacing its credentials. A matching login is reused without prompting or a
+forced token refresh. New machines use `codex login --device-auth` and are checked
+again after login. The check confirms the account identity, not live subscription
+entitlement or token validity at the OpenAI service.
+
+Override the target using `DEVTOOLS_CODEX_EXPECTED_EMAIL`, or point
+`DEVTOOLS_CODEX_IDENTITY_REFS` at a names-only reference file outside the installed
+checkout. Use vault/item IDs in references when names are duplicated. No resolved
+identity, password or TOTP is written into shell configuration. The default only
+reads `pass://codex/ChatGPT/email`; Password and TOTP are not needed for this check.
+Identity verification currently covers Codex; it does not certify the accounts
+used by other installed services.
+
+The [official Codex authentication flow](https://learn.chatgpt.com/docs/auth.md)
+supports browser/device approval, not direct password/TOTP CLI login. Those vault
+fields can support a separately supervised browser login, but unattended login-page
+automation is not part of provisioning. Device auth may need enabling in ChatGPT
+security settings; ordinary `codex login` remains a manual alternative.
 
 **2. The `codex` vault** is what the scoped token is granted access to. Change it
 with `DEVTOOLS_PAT_VAULTS`.
