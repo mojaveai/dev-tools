@@ -9,6 +9,7 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "browser"))
@@ -151,6 +152,11 @@ class BrowserTests(unittest.TestCase):
             m.publish(meta)
             m.publish(meta)
             self.assertEqual(1, sum("--bg" in call for call in calls))
+            query = parse_qs(urlsplit(meta["viewer_url"]).query)
+            self.assertEqual(query["host"], ["host.example.ts.net"])
+            self.assertEqual(query["port"], ["443"])
+            self.assertEqual(query["encrypt"], ["1"])
+            self.assertEqual(query["path"], ["browser/one/websockify"])
             self.assertIn("view_only=1", meta["viewer_url"])
             self.assertIn("browser%2Fone%2Fwebsockify", meta["viewer_url"])
             m.unpublish(meta)
@@ -263,6 +269,18 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(command, "/node")
         self.assertIn("--enable-proxy", args)
         self.assertEqual("http://127.0.0.1:1056", env["HTTPS_PROXY"])
+
+    def test_install_can_record_viewer_review_without_mac_approval(self):
+        m.write_json(m.config_path(), {})
+        with (
+            patch.dict(os.environ, {"DEVTOOLS_VIEWER_POLICY_REVIEWED": "1"}),
+            patch("configure.subprocess.check_output", return_value="/chromium"),
+            patch("configure.shutil.which", side_effect=lambda name: "/bin/" + name),
+            patch("builtins.print"),
+        ):
+            configure(REPO, Path("/runtime"), Path("/bin/dev-tools"))
+        self.assertTrue(m.config()["viewer_policy_reviewed"])
+        self.assertNotIn("mac_browser", m.config())
 
     def test_configure_preserves_approvals_and_has_no_login_calls(self):
         previous = {

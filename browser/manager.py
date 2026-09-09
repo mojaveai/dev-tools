@@ -213,7 +213,12 @@ def publish(meta):
     authority = host if port != 443 else host.rsplit(":", 1)[0]
     query = urlencode(
         {
-            "path": f"wss://{authority}{path}/websockify",
+            # noVNC 1.3/1.4 constructs ws(s)://host:port/path itself.
+            # Explicit host also selects compatible path handling in newer releases.
+            "host": host.rsplit(":", 1)[0],
+            "port": str(port),
+            "encrypt": "1",
+            "path": f"{path.lstrip('/')}/websockify",
             "autoconnect": "1",
             "reconnect": "1",
             "view_only": "1",

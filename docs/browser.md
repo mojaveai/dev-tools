@@ -78,7 +78,20 @@ listener to the intended owner/viewer identities or devices; do not assume every
 machine tagged `dev` should be able to view every other machine's signed-in
 desktop. Use the tailnet's policy tests to verify allowed and denied sources.
 
-Once that review is done:
+For a reviewed tailnet, record the acknowledgement during installation and avoid
+a separate publication step for future sessions:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh -s -- --with-browser --viewer-policy-reviewed
+```
+
+The interactive installer requests sudo when host setup needs it. It handles
+sandbox setup and Serve operator permissions, saves the review acknowledgement,
+and future sessions automatically publish their viewer URLs. This flag records
+your review; it does not change or validate tailnet ACLs. Existing machines retain
+the acknowledgement on ordinary reruns.
+
+To publish an existing session after review instead:
 
 ```sh
 dev-tools browser publish my-task --policy-reviewed
@@ -91,9 +104,12 @@ this helper cannot infer or enforce your organization’s authorization policy.
 Review again when that policy or the host's ownership changes.
 
 Tailscale must be running with MagicDNS and HTTPS enabled, and the Linux user
-must be authorized to manage Serve. If an operator needs to be designated, the
-administrator can use Tailscale's operator setting for that user; the helper
-does not grant itself privileges. Serve failures include the daemon's diagnostic.
+must be authorized to manage Serve. Provisioning uses sudo to designate the
+installing Linux user as Tailscale operator when none is set. A matching operator
+is reused; another user's operator setting is preserved and reported for the
+host owner to resolve. This grants that user Tailscale administration on this host,
+including session route creation and cleanup. Serve failures include the daemon's
+diagnostic.
 
 The URL has this shape (with connection settings in its query):
 

@@ -143,6 +143,7 @@ appended twice, and removals propagate.
 ./provision.sh --non-interactive               # never prompt
 ./provision.sh --list                          # step names
 ./provision.sh --with-browser                  # pilot: native browser + live viewer
+./provision.sh --with-browser --viewer-policy-reviewed  # reviewed tailnet; automatic publication
 ./provision.sh --with-mac-browser https://mac.example.ts.net/mcp  # optional, approval-gated
 ```
 
