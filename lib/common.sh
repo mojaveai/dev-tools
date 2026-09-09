@@ -149,15 +149,21 @@ run_installer() {
 
 json_merge() {  # json_merge TARGET  < patch.json
     _target=$1
-    DEVTOOLS_PATCH=$(cat) python3 - "$_target" <<'PY'
+    # Read before attaching the Python heredoc. In dash, a command substitution
+    # on the same command consumes that heredoc, leaving Python an empty script.
+    _merge_patch=$(cat)
+    DEVTOOLS_PATCH="$_merge_patch" python3 - "$_target" <<'PY'
 import json, sys, os
 target = sys.argv[1]
 patch = json.loads(os.environ['DEVTOOLS_PATCH'])
 try:
     with open(target) as fh:
         cur = json.load(fh)
-except (FileNotFoundError, json.JSONDecodeError):
+except FileNotFoundError:
     cur = {}
+except json.JSONDecodeError as exc:
+    sys.stderr.write('existing JSON is malformed, refusing to touch it: %s\n' % exc)
+    sys.exit(1)
 def deep(dst, src):
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
@@ -182,7 +188,8 @@ PY
 
 toml_merge() {  # toml_merge TARGET  < patch.toml
     _target=$1
-    DEVTOOLS_PATCH=$(cat) python3 - "$_target" <<'PY'
+    _merge_patch=$(cat)
+    DEVTOOLS_PATCH="$_merge_patch" python3 - "$_target" <<'PY'
 import os, sys, re
 target = sys.argv[1]
 patch_text = os.environ['DEVTOOLS_PATCH']
