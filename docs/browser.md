@@ -265,3 +265,33 @@ Before enabling the module by default, record these in an ordinary Linux host
 
 The pilot remains opt-in while any required environment/network check is
 unavailable. Installation success is not full acceptance.
+
+## Human input handoff
+
+The shared-browser skill directs the agent to give you its session URL and pause
+when your input is needed. The agent runs:
+
+```sh
+dev-tools browser request-input my-task --message "Please sign in, then click Done" --json
+dev-tools browser wait-input my-task --request-id REQUEST_ID --timeout 60 --json
+```
+
+Your open viewer automatically enables keyboard/mouse input and shows the request
+with a **Done** button. Clicking Done records completion and returns viewers to
+view-only. The agent checks that exact request ID before resuming. A timed-out
+wait or disconnected viewer leaves the request pending; it does not imply you
+finished. Reloading/reconnecting preserves a pending request. Completion from an
+older request cannot complete a newer one. Other connected viewers see the same
+state within about a second.
+
+`input-status SESSION --json` reads the state. `cancel-input SESSION --request-id ID`
+returns to view-only without recording human completion. Stopping the session
+cancels pending input. Handoff messages should describe the task, never contain
+credentials. Input toggling is a collaborative convenience; the skill tells the
+agent to pause, but this does not forcibly block Playwright commands.
+
+Installer reruns update the integration and skill. Existing legacy viewers are
+upgraded alongside their running desktop, preserving Chromium and tabs; refresh
+an already-open viewer page to load the handoff controls. The old loopback viewer
+remains until its desktop stops. The replacement follows the supervisor's lifetime
+and is removed by normal session cleanup. No unattended background updater runs.

@@ -17,9 +17,19 @@ a native Linux session; the user's Mac does not need to stay connected.
 - If `viewer_url` is absent, report `viewer_error` and use `browser doctor`.
   Local automation can work while publication is unavailable. Never describe a
   configured route as proof another device can reach it.
-- When login or other human input is needed, stop browser actions, share the
-  URL, and wait for the user to confirm they are finished. Do not ask them to
-  paste passwords into chat. Viewer input mode does not pause an agent for you.
+- When login or human input is needed, stop browser actions and run
+  `dev-tools browser request-input SESSION --message "Please sign in, then click Done" --json`.
+  Share the viewer URL and explain the task. The viewer enables input and shows
+  a Done button automatically; do not ask the user to find noVNC settings.
+- Save the returned request ID. Wait with
+  `dev-tools browser wait-input SESSION --request-id ID --timeout 60 --json`.
+  Repeat while that same request is pending. Resume browser actions only when
+  that request reports `completed` (the user clicked Done), or the user explicitly
+  confirms completion in conversation. For conversational completion, use
+  `dev-tools browser cancel-input SESSION --request-id ID` to return to view-only.
+  Timeout, viewer disconnect, cancellation, or a different request ID is not
+  permission to resume. Never put passwords in the handoff message or ask for
+  passwords in chat. This cooperative handoff does not mechanically block MCP actions.
 - Closing a viewer or MCP connection leaves the browser running. Resume with
   the same named session; do not copy cookies or share a live profile with a
   second agent. `browser stop ID` stops only that session and retains its profile.

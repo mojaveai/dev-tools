@@ -116,8 +116,11 @@ mod_browser() {
     case $? in 0) : ;; 10) _browser_changed=1 ;; *) note "Codex browser configuration failed"; return 1 ;; esac
     printf '%s' "$_browser_patches" | jq '.claude' | json_merge "${DEVTOOLS_CLAUDE_CONFIG:-$HOME/.claude.json}"
     case $? in 0) : ;; 10) _browser_changed=1 ;; *) note "Claude browser configuration failed"; return 1 ;; esac
-    # Auth/profile files, running services and Tailscale enrollment are never
-    # touched by this module. Access readiness is reported separately.
+    # Upgrade the viewer endpoint for existing desktops without restarting
+    # Chromium or disturbing profiles/tabs. New sessions use the new viewer.
+    python3 "$REPO_DIR/browser/upgrade_viewer.py" || {
+        note "browser installed; running viewer upgrade incomplete, rerun to retry"; return 1;
+    }
     note "local browser ready; dev-tools browser doctor reports viewer readiness; restart agent to load MCP"
     [ "$_browser_changed" = 1 ] && return "$RC_UPDATED"
     return "$RC_OK"
