@@ -115,4 +115,36 @@ class RoutingTests(unittest.TestCase):
             r.forward(io.BytesIO(response),io.BytesIO(),'Mac')
         self.assertEqual(response,output.getvalue());local.assert_not_called()
 
+
+remote=load('native_remote','remote_session.py')
+class RecoveryTests(unittest.TestCase):
+    def test_stale_live_listener_is_replaced_and_owner_is_enforced(self):
+        with tempfile.TemporaryDirectory() as d:
+            endpoint=Path(d)/'browser.sock'; generation=Path(d)/'new.sock'
+            old=socket.socket(socket.AF_UNIX);new=socket.socket(socket.AF_UNIX)
+            try:
+                old.bind(str(endpoint));old.listen();new.bind(str(generation));new.listen()
+                Path(str(endpoint)+'.owner').write_text('mine')
+                cfg={'remote_socket':str(endpoint),'generation':str(generation),'owner':'other','repair_root_socket':False}
+                with self.assertRaises(RuntimeError):remote.publish(cfg)
+                self.assertFalse(endpoint.is_symlink())
+                cfg['owner']='mine';remote.publish(cfg)
+                self.assertEqual(generation.name,os.readlink(endpoint))
+                client=socket.socket(socket.AF_UNIX);client.connect(str(endpoint));client.close()
+            finally:old.close();new.close()
+    def test_old_session_cleanup_preserves_new_generation(self):
+        with tempfile.TemporaryDirectory() as d:
+            endpoint=Path(d)/'browser.sock'; generation=Path(d)/'new.sock';latest=Path(d)/'latest.sock'
+            listener=socket.socket(socket.AF_UNIX)
+            try:
+                listener.bind(str(generation));listener.listen()
+                Path(str(endpoint)+'.owner').write_text('mine')
+                cfg={'remote_socket':str(endpoint),'generation':str(generation),'owner':'mine','repair_root_socket':False}
+                def disconnected(*args):
+                    endpoint.unlink();endpoint.symlink_to(latest.name)
+                    return [],[],[]
+                with patch.object(remote.select,'select',side_effect=disconnected):remote.run(cfg)
+                self.assertEqual(latest.name,os.readlink(endpoint));self.assertFalse(generation.exists())
+            finally:listener.close()
+
 if __name__=='__main__':unittest.main()

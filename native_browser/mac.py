@@ -11,11 +11,13 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
+import select
 
 LABEL_PREFIX='ai.mojave.dev-tools.native-browser.'
 
 def ssh(host, command, **kwargs):
-    return subprocess.run(['ssh','-x','-o','BatchMode=yes','-o','ConnectTimeout=10',host,command], **kwargs)
+    return subprocess.run(['ssh','-x','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ControlMaster=no','-o','ControlPath=none',host,command], timeout=20, **kwargs)
 
 def remote_identity(host):
     script="import os,json,pathlib; print(json.dumps({'home':str(pathlib.Path.home()),'uid':os.getuid(),'gid':os.getgid(),'codex_home':os.environ.get('CODEX_HOME',str(pathlib.Path.home()/'.codex'))}))"
@@ -36,14 +38,22 @@ def install(host, repair_root_socket=False):
     root=Path.home()/'.local/share/dev-tools-native-browser'
     root.mkdir(parents=True,exist_ok=True,mode=0o700)
     local_socket=str(Path.home()/'.codex/run'/('native-'+suffix+'.sock'))
-    for path in (remote_socket,local_socket):
+    for path in (remote_socket,local_socket,str(Path(remote_socket).with_name('nb-'+'0'*16+'.sock'))):
         if len(os.fsencode(path))>=100:raise ValueError('Native socket path too long; use a shorter home/CODEX_HOME')
-    settings={'host':host,'remote_socket':remote_socket,'local_socket':local_socket,'uid':identity['uid'],'gid':identity['gid'],'repair_root_socket':repair_root_socket}
     config_path=root/(suffix+'.json')
+    previous=json.loads(config_path.read_text()) if config_path.exists() else {}
+    owner=previous.get('owner',uuid.uuid4().hex)
+    claim="import os,pathlib; p=pathlib.Path("+repr(remote_socket+'.owner')+"); token="+repr(owner)+"; fd=os.open(str(p),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600) if not p.exists() else None; os.write(fd,token.encode()) if fd is not None else None; os.close(fd) if fd is not None else None; assert p.read_text()==token, 'Remote relay belongs to another installation'"
+    ssh(host,'python3 -c '+shlex.quote(claim),check=True)
+    settings={'owner':owner,'host':host,'remote_socket':remote_socket,'local_socket':local_socket,'uid':identity['uid'],'gid':identity['gid'],'repair_root_socket':repair_root_socket}
     from state import atomic_write
     changed=atomic_write(config_path,json.dumps(settings,indent=2)+'\n')
     plist=Path.home()/'Library/LaunchAgents'/(label+'.plist')
     spec={'Label':label,'ProgramArguments':[sys.executable,str(Path(__file__).resolve()),'supervise',str(config_path)],'RunAtLoad':True,'KeepAlive':True,'ThrottleInterval':10,'StandardOutPath':str(root/(suffix+'.log')),'StandardErrorPath':str(root/(suffix+'.err'))}
+    # Reload running supervisors when installed source changes, too.
+    source_hash=hashlib.sha256()
+    for source in sorted(Path(__file__).parent.glob('*.py')):source_hash.update(source.read_bytes())
+    spec['EnvironmentVariables']={'DEV_TOOLS_NATIVE_SOURCE':source_hash.hexdigest()}
     data=plistlib.dumps(spec)
     changed=changed or not plist.exists() or plist.read_bytes()!=data
     plist.parent.mkdir(parents=True,exist_ok=True)
@@ -80,20 +90,21 @@ def supervise(config_path):
                 time.sleep(.1)
             if not running:break
             if server.poll() is not None:cleanup();time.sleep(5);continue
-            # Refuse an already live remote socket: never steal another relay.
-            probe="import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1)\ntry: s.connect("+repr(cfg['remote_socket'])+"); sys.exit(0)\nexcept (FileNotFoundError,ConnectionRefusedError): sys.exit(1)\nexcept OSError: sys.exit(2)"
-            if ssh(cfg['host'],'python3 -c '+shlex.quote(probe),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=1:
-                print('Remote relay socket is in use or could not be safely checked; stop the previous relay before replacing it.',file=sys.stderr,flush=True)
-                cleanup();time.sleep(10);continue
-            tunnel=subprocess.Popen(['ssh','-x','-N','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','-o','StreamLocalBindUnlink=yes','-R',cfg['remote_socket']+':'+cfg['local_socket'],cfg['host']]);children.append(tunnel)
-            if cfg['repair_root_socket']:
-                command='test -S '+shlex.quote(cfg['remote_socket'])+' && sudo -n chown '+shlex.quote(f"{cfg['uid']}:{cfg['gid']}")+' '+shlex.quote(cfg['remote_socket'])
-                for _ in range(15):
-                    if not running or tunnel.poll() is not None:break
-                    if ssh(cfg['host'],command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:break
-                    time.sleep(1)
-                else:print('Could not assign the forwarded socket to the agent user; check SSH/sudo setup.',file=sys.stderr,flush=True)
-            while running and server.poll() is None and tunnel.poll() is None:time.sleep(1)
+            # Each SSH generation has its own listener. A stale sshd cannot
+            # block the next generation or remove its published endpoint.
+            generation=str(Path(cfg['remote_socket']).with_name('nb-'+uuid.uuid4().hex[:16]+'.sock'))
+            script=Path(__file__).with_name('remote_session.py').read_text()
+            command='python3 -u -c '+shlex.quote(script)+' '+shlex.quote(json.dumps({**cfg,'generation':generation}))
+            tunnel=subprocess.Popen(['ssh','-x','-T','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ControlMaster=no','-o','ControlPath=none','-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2','-R',generation+':'+cfg['local_socket'],cfg['host'],command],stdin=subprocess.PIPE,stdout=subprocess.PIPE,bufsize=0);children.append(tunnel)
+            try:
+                while running and server.poll() is None and tunnel.poll() is None:
+                    tunnel.stdin.write(b'.')
+                    ready,_,_=select.select([tunnel.stdout],[],[],15)
+                    if not ready or not os.read(tunnel.stdout.fileno(),1):
+                        print('Native tunnel heartbeat lost; reconnecting.',file=sys.stderr,flush=True)
+                        break
+                    time.sleep(2)
+            except (OSError,ValueError):pass
             cleanup()
             if running:time.sleep(5)
     finally:stop();cleanup()

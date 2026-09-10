@@ -79,9 +79,12 @@ server that creates forwarded sockets under the logged-in user.
 
 The command installs a per-host user LaunchAgent, a private local socket and an
 SSH reverse UNIX-socket forward. No TCP listener is exposed. Repeated setup is
-idempotent; it only reloads the service when its configuration changes. The
-supervisor reconnects after SSH loss. It refuses a remote socket already serving
-another relay. Stop the prototype `com.manbir.native-chrome-relay` LaunchAgent,
+idempotent; it reloads the service when its configuration or installed source changes.
+The supervisor uses dedicated SSH connections (no shared ControlMaster), with
+15-second heartbeat deadlines on both ends. After a drop it retries automatically
+using a fresh socket, then atomically publishes that socket at the stable agent
+path. An orphaned listener cannot block recovery. A per-installation owner marker
+prevents a different installation from replacing the endpoint. Stop the prototype `com.manbir.native-chrome-relay` LaunchAgent,
 if present, before starting this replacement; do not run two forwarders for the
 same remote socket.
 
@@ -126,7 +129,15 @@ settings live in `~/.local/share/dev-tools-native-browser/`. It starts at login,
 requires the Mac to stay awake, and ends active relay connections when stopped.
 Use `launchctl bootout gui/$(id -u) PATH_TO_PLIST` to stop it, and remove that
 specific plist to uninstall automatic startup. Remove its per-host settings and
-socket only after stopping it.
+socket only after stopping it. The remote `.owner` file identifies this installation;
+retain it across upgrades, and remove it only when intentionally uninstalling or
+transferring ownership. Keep the matching Mac settings file across upgrades.
+
+Recovery normally takes about 20–30 seconds after a stalled connection when SSH
+is reachable (a forced-stall test recovered in 25.7 seconds). Longer outages keep
+retrying. This restores new MCP connections; an interrupted native session is not
+resumed and browser actions are never replayed automatically. Reconnect MCP if
+an existing task lost its connection or selected local fallback during the outage.
 
 To restore unwrapped local CUA, remove `[mcp_servers.cua_repl]` and the
 `[plugins."unified-computer-use@openai-bundled".mcp_servers.cua_repl]` override from
