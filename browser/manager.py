@@ -1,7 +1,7 @@
 """Native browser lifecycle. Playwright, TigerVNC and noVNC do the actual work.
 
-No HTTP/MCP proxy is implemented here. A detached supervisor owns each desktop;
-agent MCP clients attach using the upstream Playwright CDP transport.
+These optional viewer sessions are independent of the native cua_repl router.
+A detached supervisor owns each desktop; no legacy agent MCP is launched.
 """
 
 import argparse
@@ -589,82 +589,11 @@ def supervise(name):
 
 
 def run_mcp(name):
-    directory = session_dir(name)
-    with lock(directory / "agent.lock", blocking=False):
-        meta = start(name)
-        print(
-            json.dumps(
-                {
-                    "session_id": name,
-                    "viewer_url": meta["viewer_url"],
-                    "viewer_error": meta.get("viewer_error"),
-                }
-            ),
-            file=sys.stderr,
-        )
-        cfg = config()
-        command = [
-            cfg["node"],
-            str(Path(cfg["runtime"]) / "node_modules/@playwright/mcp/cli.js"),
-            "--cdp-endpoint",
-            f"http://127.0.0.1:{meta['cdp_port']}",
-            "--output-dir",
-            str(directory / "artifacts"),
-        ]
-        # Keep the lock in this parent while the upstream MCP owns stdin/stdout.
-        child = subprocess.Popen(command)
-
-        def end_client(signum, _frame):
-            if child.poll() is None:
-                child.send_signal(signum)
-
-        signal.signal(signal.SIGTERM, end_client)
-        signal.signal(signal.SIGINT, end_client)
-        try:
-            return child.wait()
-        finally:
-            if child.poll() is None:
-                child.terminate()
-
-
-def validate_mac_endpoint(endpoint):
-    parsed = urlsplit(endpoint)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise BrowserError(
-            "Mac endpoint must be an HTTPS URL without credentials, query or fragment."
-        )
-    return endpoint.rstrip("/")
+    raise BrowserError("Legacy Playwright MCP removed. Use the native cua_repl MCP; rerun provisioning and reconnect the agent.")
 
 
 def mac_mcp():
-    cfg = config()
-    mac = cfg.get("mac_browser", {})
-    if not mac.get("approved"):
-        raise BrowserError(
-            "Mac browser access is pending owner approval. On the Mac approve network/extension access, then run dev-tools browser approve-mac."
-        )
-    endpoint = validate_mac_endpoint(mac["endpoint"])
-    command = [
-        cfg["node"],
-        str(Path(cfg["runtime"]) / "node_modules/mcp-remote/dist/proxy.js"),
-        endpoint,
-    ]
-    env = dict(os.environ)
-    if mac.get("proxy"):
-        env.update(
-            HTTPS_PROXY=mac["proxy"],
-            HTTP_PROXY=mac["proxy"],
-            NO_PROXY="localhost,127.0.0.1",
-        )
-        command.append("--enable-proxy")
-    os.execve(cfg["node"], command, env)
+    raise BrowserError("Legacy Mac MCP removed. Run dev-tools native-browser install-mac --ssh-host HOST on the Mac, then use cua_repl.")
 
 
 def main(argv=None):
@@ -747,22 +676,8 @@ def main(argv=None):
             mac_mcp()
             return
         if args.command in ("approve-mac", "revoke-mac"):
-            cfg = config()
-            if not cfg.get("mac_browser"):
-                raise BrowserError(
-                    "No Mac endpoint configured; provision with --with-mac-browser URL."
-                )
-            cfg["mac_browser"]["approved"] = args.command == "approve-mac"
-            write_json(config_path(), cfg)
-            print(
-                "Mac client "
-                + (
-                    "enabled; remote ACL and extension approval still apply."
-                    if args.command == "approve-mac"
-                    else "disabled for new connections; revoke active access at the Mac as well."
-                )
-            )
-            return
+            raise BrowserError("Legacy Mac MCP removed; configure the native SSH relay on the Mac instead.")
+
         if args.command == "list":
             result = [
                 status(json.loads(p.read_text()))
@@ -784,10 +699,7 @@ def main(argv=None):
                     )
                 },
                 "viewer_policy_reviewed": cfg.get("viewer_policy_reviewed", False),
-                "mac_browser": {
-                    "configured": bool(cfg.get("mac_browser")),
-                    "approved": cfg.get("mac_browser", {}).get("approved", False),
-                },
+                "agent_control": "native cua_repl (independent of viewer)",
             }
             from sandbox import probe
 

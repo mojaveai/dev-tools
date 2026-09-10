@@ -1,22 +1,28 @@
 ---
 name: shared-browser
-description: Use the Linux host's Playwright browser with a private live viewer URL so the user can watch or complete logins in the same session. Applies to browser tasks on machines provisioned by dev-tools.
+description: Use native cua_repl routing on dev-tools hosts, with Mac Chrome preferred and local native fallback; identify the active browser destination and use the optional noVNC viewer for explicit manual fallback tasks.
 ---
 
-Use the `dev-tools-browser` MCP tools for browser work on this host. They launch
-a native Linux session; the user's Mac does not need to stay connected.
+Use the `cua_repl` MCP for Codex browser work on dev-tools hosts. Its initialization
+instructions identify the selected machine. It prefers a connected Mac Chrome
+extension, otherwise the local native runtime. Follow the tool's returned API
+and permission instructions. The legacy `dev-tools-browser` and
+`dev-tools-mac-browser` MCPs are retired.
 
-- Find your session with `dev-tools browser status --json` when `CODEX_THREAD_ID`
-  or `DEVTOOLS_BROWSER_SESSION` is set. Otherwise read the session ID from this
-  MCP server's startup log; `dev-tools browser list --json` lists IDs and health.
-  Do not guess which session is yours if several agents are running. An explicit
-  `DEVTOOLS_BROWSER_SESSION` must be unique to a task.
-- Give the user the `viewer_url` as a clickable link early in browser work. It
-  opens the exact Linux browser you control, initially in view-only mode. They
-  can enable input in noVNC. They need an authorized device on the tailnet.
-- If `viewer_url` is absent, report `viewer_error` and use `browser doctor`.
-  Local automation can work while publication is unavailable. Never describe a
-  configured route as proof another device can reach it.
+Selection is pinned per MCP connection. A JavaScript reset does not reselect the
+machine. If the connection fails, reconnect MCP and rediscover the destination;
+do not replay an uncertain action on another machine. Do not weaken permissions
+to make the Mac route succeed.
+
+`dev-tools native-browser check` reports current route availability but does not
+change the destination of an existing connection. Native tools require genuine
+Codex task/turn metadata and approval callbacks; do not manufacture approvals.
+
+For an explicitly requested noVNC fallback, use `dev-tools browser start NAME
+--json` and share the returned `viewer_url`. These are separate viewer sessions;
+verify the exact browser/tab before claiming the viewer shows native CUA actions.
+Missing publication is diagnosed with `dev-tools browser doctor --json`.
+
 - When login or human input is needed, stop browser actions and run
   `dev-tools browser request-input SESSION --message "Please sign in, then click Done" --json`.
   Share the viewer URL and explain the task. The viewer enables input and shows
@@ -30,13 +36,7 @@ a native Linux session; the user's Mac does not need to stay connected.
   Timeout, viewer disconnect, cancellation, or a different request ID is not
   permission to resume. Never put passwords in the handoff message or ask for
   passwords in chat. This cooperative handoff does not mechanically block MCP actions.
-- Closing a viewer or MCP connection leaves the browser running. Resume with
-  the same named session; do not copy cookies or share a live profile with a
-  second agent. `browser stop ID` stops only that session and retains its profile.
-  `browser delete-profile ID --yes` destroys saved logins and is explicit cleanup.
-- Do not enable Mac access, mark policy reviewed, or change tailnet policy just
-  to make a failed connection succeed. Optional `dev-tools-mac-browser` access
-  needs the owner's prior approval and network/extension authorization.
 
-These sessions share the Linux user's privileges and are not security sandboxes
-between mutually untrusted agents. Use separate Linux accounts/hosts for that.
+`browser stop ID` preserves the profile; deleting a profile is explicit cleanup.
+Do not change tailnet policy just to make a viewer reachable. Sessions share their
+OS user's privileges and are not isolation boundaries between untrusted agents.

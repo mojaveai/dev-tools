@@ -3,7 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@playwright/mcp": "0.0.80",
-    "mcp-remote": "0.8.6"
+    "playwright": "1.63.0-alpha-2026-08-31"
   }
 }

@@ -228,47 +228,14 @@ class BrowserTests(unittest.TestCase):
                 m.unpublish(meta)
             self.assertFalse(any(call[-1] == "off" for call in calls))
 
-    def test_mac_access_defaults_closed(self):
-        m.write_json(
-            m.config_path(),
-            {
-                "mac_browser": {
-                    "endpoint": "https://mac.example.ts.net/mcp",
-                    "approved": False,
-                }
-            },
-        )
-        with patch.object(m.os, "execve") as execute, self.assertRaises(m.BrowserError):
-            m.mac_mcp()
+    def test_legacy_mcp_commands_do_not_launch_processes(self):
+        with patch.object(m.subprocess, "Popen") as popen, patch.object(m.os, "execve") as execute:
+            with self.assertRaisesRegex(m.BrowserError, "Legacy Playwright MCP removed"):
+                m.run_mcp("old-session")
+            with self.assertRaisesRegex(m.BrowserError, "Legacy Mac MCP removed"):
+                m.mac_mcp()
+        popen.assert_not_called()
         execute.assert_not_called()
-        for endpoint in (
-            "http://mac/mcp",
-            "https://user:secret@mac/mcp",
-            "https://mac/mcp?token=secret",
-            "file:///tmp/x",
-        ):
-            with self.assertRaises(m.BrowserError):
-                m.validate_mac_endpoint(endpoint)
-
-    def test_mac_proxy_uses_existing_adapter(self):
-        m.write_json(
-            m.config_path(),
-            {
-                "node": "/node",
-                "runtime": "/runtime",
-                "mac_browser": {
-                    "endpoint": "https://mac.example.ts.net/mcp",
-                    "approved": True,
-                    "proxy": "http://127.0.0.1:1056",
-                },
-            },
-        )
-        with patch.object(m.os, "execve") as execute:
-            m.mac_mcp()
-        command, args, env = execute.call_args.args
-        self.assertEqual(command, "/node")
-        self.assertIn("--enable-proxy", args)
-        self.assertEqual("http://127.0.0.1:1056", env["HTTPS_PROXY"])
 
     def test_install_can_record_viewer_review_without_mac_approval(self):
         m.write_json(m.config_path(), {})

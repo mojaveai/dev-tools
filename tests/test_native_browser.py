@@ -1,0 +1,118 @@
+"""Native routing/migration contracts; no real browser, auth or host mutations."""
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+import tempfile
+import threading
+import time
+import tomllib
+import unittest
+from unittest.mock import patch
+
+REPO=Path(__file__).resolve().parents[1]
+def load(name,file):
+    spec=importlib.util.spec_from_file_location(name,REPO/'native_browser'/file)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+cfg=load('native_config','configure.py');r=load('native_router','router.py');relay=load('native_relay','relay.py')
+
+class MigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.codex=self.root/'config.toml';self.claude=self.root/'claude.json'
+    def tearDown(self):self.tmp.cleanup()
+    def test_upgrade_preserves_credentials_comments_and_unrelated_servers(self):
+        self.codex.write_text('''# Keep this comment
+model = "example"
+[mcp_servers.other]
+command = "other"
+[mcp_servers."dev-tools-browser"]
+command = "old"
+[mcp_servers."dev-tools-browser".env]
+SAMPLE = "preserve elsewhere only"
+[mcp_servers.dev-tools-mac-browser]
+command = "old-mac"
+[plugins."unified-computer-use@openai-bundled"]
+enabled = true
+[plugins."unified-computer-use@openai-bundled".mcp_servers.cua_repl]
+startup_timeout_sec = 99
+''')
+        self.claude.write_text(json.dumps({'oauthAccount':{'fixture':'unchanged'},'mcpServers':{'other':{'command':'keep'},'dev-tools-browser':{},'dev-tools-mac-browser':{}}}))
+        self.assertTrue(cfg.configure(REPO,self.codex,self.claude))
+        c=tomllib.loads(self.codex.read_text());self.assertEqual({'other','cua_repl'},set(c['mcp_servers']))
+        self.assertEqual('other',c['mcp_servers']['other']['command']);self.assertIn('# Keep this comment',self.codex.read_text())
+        self.assertFalse(c['plugins'][cfg.PLUGIN]['mcp_servers']['cua_repl']['enabled'])
+        self.assertTrue(c['plugins'][cfg.PLUGIN]['enabled'])
+        self.assertEqual(99,c['plugins'][cfg.PLUGIN]['mcp_servers']['cua_repl']['startup_timeout_sec'])
+        self.assertEqual({'oauthAccount':{'fixture':'unchanged'},'mcpServers':{'other':{'command':'keep'}}},json.loads(self.claude.read_text()))
+        before=self.codex.read_bytes();self.assertFalse(cfg.configure(REPO,self.codex,self.claude));self.assertEqual(before,self.codex.read_bytes())
+    def test_fresh_install_and_custom_socket_survive_rerun(self):
+        self.assertTrue(cfg.configure(REPO,self.codex,self.claude,Path('/private/custom.sock')))
+        self.assertFalse(cfg.configure(REPO,self.codex,self.claude))
+        self.assertFalse(self.claude.exists())
+        self.assertIn('/private/custom.sock',tomllib.loads(self.codex.read_text())['mcp_servers']['cua_repl']['args'])
+    def test_malformed_configs_leave_both_files_untouched(self):
+        for ct,jt in [('[bad','{}'),('[mcp_servers.dev-tools-browser]\ncommand="old"\n','{broken')]:
+            self.codex.write_text(ct);self.claude.write_text(jt)
+            with self.assertRaises(ValueError):cfg.configure(REPO,self.codex,self.claude)
+            self.assertEqual(ct,self.codex.read_text());self.assertEqual(jt,self.claude.read_text())
+    def test_unmanaged_native_server_is_not_overwritten(self):
+        self.codex.write_text('[mcp_servers.cua_repl]\ncommand="someone-elses-server"\n')
+        before=self.codex.read_bytes()
+        with self.assertRaises(ValueError):cfg.configure(REPO,self.codex,self.claude)
+        self.assertEqual(before,self.codex.read_bytes())
+    def test_quoted_headers_and_array_tables_are_preserved(self):
+        text='[mcp_servers."dev-tools-browser"] # comment\ncommand="old"\n[[hooks.Stop]]\nmatcher="x"\n'
+        self.codex.write_text(text);cfg.configure(REPO,self.codex,self.claude)
+        self.assertEqual([{'matcher':'x'}],tomllib.loads(self.codex.read_text())['hooks']['Stop'])
+
+class RoutingTests(unittest.TestCase):
+    def fake_peer(self,path,browsers=None,stall=False):
+        server=socket.socket(socket.AF_UNIX);server.bind(path);server.listen()
+        def serve():
+            conn,_=server.accept()
+            try:
+                if stall:time.sleep(.25);return
+                f=conn.makefile('rwb',buffering=0)
+                while line:=f.readline():
+                    v=json.loads(line)
+                    if v.get('method')=='initialize':result={'protocolVersion':'2024-11-05','serverInfo':{'name':'fixture','version':'1'},'capabilities':{}}
+                    elif v.get('method')=='tools/call':
+                        self.assertEqual('await cua.listBrowsers();',v['params']['arguments']['code'])
+                        result={'content':[{'type':'text','text':json.dumps(browsers)}]}
+                    else:continue
+                    f.write((json.dumps({'jsonrpc':'2.0','id':v['id'],'result':result})+'\n').encode())
+            finally:conn.close();server.close()
+        t=threading.Thread(target=serve,daemon=True);t.start();return t
+    def test_mac_probe_requires_connected_chrome(self):
+        for browsers,expected in [([{'family':'chrome','type':'extension'}],True),([],False),([{'type':'iab'}],False)]:
+            with tempfile.TemporaryDirectory() as d:
+                path=d+'/s';t=self.fake_peer(path,browsers)
+                self.assertEqual(expected,r.mac_available(path));t.join(1)
+    def test_dead_and_hung_tunnels_fall_back_with_deadline(self):
+        self.assertFalse(r.mac_available('/nonexistent-native-test.sock',.1))
+        with tempfile.TemporaryDirectory() as d:
+            t=self.fake_peer(d+'/s',stall=True);start=time.monotonic()
+            self.assertFalse(r.mac_available(d+'/s',.1));self.assertLess(time.monotonic()-start,.5);t.join(1)
+    def test_relay_handles_partial_pipe_writes(self):
+        class PartialWriter(io.BytesIO):
+            def write(self, data):return super().write(data[:17])
+        out=PartialWriter();payload=b'large MCP payload'*10000
+        relay.pump(io.BytesIO(payload),out)
+        self.assertEqual(payload,out.getvalue())
+
+    def test_transport_preserves_approvals_and_images_without_retry(self):
+        approval={'jsonrpc':'2.0','id':'approval-1','method':'elicitation/create','params':{'message':'Allow?','_meta':{'origin':'https://example.com'}}}
+        image={'jsonrpc':'2.0','id':3,'result':{'content':[{'type':'image','data':'x'*150000,'mimeType':'image/png'}]}}
+        response=b''.join((json.dumps(v)+'\n').encode() for v in [approval,image])
+        output=io.BytesIO()
+        class Stream:
+            def __init__(self,b):self.buffer=b
+        with patch.object(r.sys,'stdin',Stream(io.BytesIO())),patch.object(r.sys,'stdout',Stream(output)),patch.object(r,'local_runtime') as local:
+            r.forward(io.BytesIO(response),io.BytesIO(),'Mac')
+        self.assertEqual(response,output.getvalue());local.assert_not_called()
+
+if __name__=='__main__':unittest.main()

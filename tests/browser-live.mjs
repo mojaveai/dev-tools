@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,51 +30,23 @@ const fixture = http.createServer((req, res) => {
 await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${fixture.address().port}/`;
 
-// Tiny test-only stdio JSON-RPC driver. Production uses upstream MCP unchanged.
+// Viewer-only integration. The legacy MCP is intentionally no longer installed.
+// Test setup uses the retained Playwright library to seed a synthetic page.
 async function attach(session) {
-  const child = spawn(executable, ['browser', 'mcp', session], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-  let next = 0;
-  let stderr = '';
-  child.stderr.on('data', data => { stderr += data; });
-  const pending = new Map();
-  readline.createInterface({ input: child.stdout }).on('line', line => {
-    const msg = JSON.parse(line);
-    const wait = pending.get(msg.id);
-    if (wait) {
-      clearTimeout(wait.timer); pending.delete(msg.id);
-      if (msg.error) wait.reject(new Error(JSON.stringify(msg.error)));
-      else wait.resolve(msg.result);
-    }
-  });
-  child.on('exit', () => {
-    for (const wait of pending.values()) { clearTimeout(wait.timer); wait.reject(new Error(stderr)); }
-    pending.clear();
-  });
-  const request = (method, params) => new Promise((resolve, reject) => {
-    const id = ++next;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`MCP timeout: ${method}\n${stderr}`)); }, 45000);
-    pending.set(id, { resolve, reject, timer });
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
-  });
+  const meta = command('status', session);
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${meta.cdp_port}`);
+  const context = browser.contexts()[0];
+  const page = context.pages()[0] || await context.newPage();
   const client = {
     async call(name, args = {}) {
-      const result = await request('tools/call', { name, arguments: args });
-      assert.ok(!result.isError, JSON.stringify(result));
-      return result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+      if (name === 'browser_navigate') { await page.goto(args.url); return ''; }
+      if (name === 'browser_snapshot') return await page.locator('body').innerText();
+      if (name === 'browser_evaluate') return await page.evaluate(args.function);
+      throw new Error(`Unsupported viewer test operation: ${name}`);
     },
-    async close() {
-      clients.delete(client);
-      child.stdin.end();
-      if (child.exitCode !== null) return;
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { child.kill(); reject(new Error('MCP did not exit after EOF')); }, 8000);
-        child.once('exit', () => { clearTimeout(timer); resolve(); });
-      });
-    },
+    async close() { clients.delete(client); await browser.close(); },
   };
   clients.add(client);
-  await request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dev-tools-live-test', version: '1' } });
-  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   return client;
 }
 
@@ -157,7 +128,7 @@ try {
       assert.ok(entries.every(line => /^(127\.0\.0\.1|\[::1\]):/.test(line.split(/\s+/)[3])), `Non-loopback listener on ${port}`);
     }
   }
-  console.log(JSON.stringify({ passed: ['two isolated native desktops', 'real MCP navigation', 'noVNC view-only default', 'human login through noVNC', 'automatic input handoff', 'pending handoff survives refresh', 'Done restores view-only', 'viewer disconnect survival', 'MCP reconnect survival', 'persistent login after restart', 'session-scoped cleanup', 'loopback-only listeners'], tailnet_viewer: 'not tested by this local test', state: scratch }, null, 2));
+  console.log(JSON.stringify({ passed: ['two isolated native desktops', 'synthetic viewer navigation', 'noVNC view-only default', 'human login through noVNC', 'automatic input handoff', 'pending handoff survives refresh', 'Done restores view-only', 'viewer disconnect survival', 'viewer test connection survival', 'persistent login after restart', 'session-scoped cleanup', 'loopback-only listeners'], tailnet_viewer: 'not tested by this local test', state: scratch }, null, 2));
 } finally {
   for (const client of clients) await client.close().catch(() => {});
   if (viewerBrowser) await viewerBrowser.close();

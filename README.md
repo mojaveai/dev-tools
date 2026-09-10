@@ -7,7 +7,11 @@ and to keep it there.
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
 
-Include the **shareable browser pilot** with one command:
+Native Codex browser routing is configured on every install: Mac Chrome when
+available, otherwise the host's native runtime. Set up the Mac relay once using
+[the native browser guide](docs/native-browser.md).
+
+Include the optional **noVNC browser viewer** with one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh -s -- --with-browser
@@ -69,7 +73,8 @@ It is built for a mobile SSH client (Termius, Blink):
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
 | g2-terminal | installed from its private release |
-| Shared browser (pilot) | `--with-browser`: native Playwright sessions with private live viewer URLs; [setup and operations](docs/browser.md) |
+| Native browser control | `cua_repl`: Mac-first native Chrome control over SSH, local fallback; [setup](docs/native-browser.md) |
+| Browser viewer (pilot) | `--with-browser`: optional Linux browser with private noVNC viewing; [operations](docs/browser.md) |
 
 ## How trust flows
 
@@ -144,7 +149,7 @@ appended twice, and removals propagate.
 ./provision.sh --list                          # step names
 ./provision.sh --with-browser                  # pilot: native browser + live viewer
 ./provision.sh --with-browser --viewer-policy-reviewed  # reviewed tailnet; automatic publication
-./provision.sh --with-mac-browser https://mac.example.ts.net/mcp  # optional, approval-gated
+./provision.sh --only mod_native_browser       # migrate legacy MCPs to native routing
 ```
 
 ## One-time setup

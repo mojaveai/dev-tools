@@ -6,7 +6,18 @@ import sys
 from pathlib import Path
 
 repo = Path(__file__).resolve().parent.parent
-if len(sys.argv) > 1 and sys.argv[1] == "browser":
+if len(sys.argv) > 1 and sys.argv[1] == "native-browser":
+    sys.path.insert(0, str(repo / "native_browser"))
+    if len(sys.argv) > 2 and sys.argv[2] == "install-mac":
+        from mac import main
+        main(sys.argv[2:])
+    elif sys.argv[2:3] in (["check"], ["mcp"]):
+        from router import main
+        sys.argv = [sys.argv[0], *(["--check"] if sys.argv[2:3] == ["check"] else []), *sys.argv[3:]]
+        main()
+    else:
+        sys.exit("Usage: dev-tools native-browser {check|mcp|install-mac} [options]")
+elif len(sys.argv) > 1 and sys.argv[1] == "browser":
     sys.path.insert(0, str(repo / "browser"))
     from manager import main
 

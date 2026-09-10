@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from manager import config_path, validate_mac_endpoint, write_json
+from manager import config_path, write_json
 
 
 def configure(repo, runtime, executable):
@@ -41,65 +41,12 @@ def configure(repo, runtime, executable):
     if os.environ.get("DEVTOOLS_VIEWER_POLICY_REVIEWED") == "1":
         cfg["viewer_policy_reviewed"] = True
     cfg.setdefault("viewer_https_port", 443)
-    if os.environ.get("DEVTOOLS_MAC_BROWSER_ENDPOINT"):
-        endpoint = validate_mac_endpoint(os.environ["DEVTOOLS_MAC_BROWSER_ENDPOINT"])
-        old = cfg.get("mac_browser", {})
-        proxy = os.environ.get(
-            "DEVTOOLS_MAC_BROWSER_PROXY",
-            old.get("proxy", "") if old.get("endpoint") == endpoint else "",
-        )
-        cfg["mac_browser"] = {
-            "endpoint": endpoint,
-            "proxy": proxy,
-            "approved": old.get("approved", False)
-            if (old.get("endpoint"), old.get("proxy", "")) == (endpoint, proxy)
-            else False,
-        }
     if cfg != previous:
         write_json(path, cfg)
 
-    # Scratch patches contain no credentials. Existing merge helpers perform the
-    # actual edits, including TOML comments/unrelated table preservation.
-    command = str(executable)
-    servers = {
-        "dev-tools-browser": {
-            "type": "stdio",
-            "command": command,
-            "args": ["browser", "mcp"],
-        }
-    }
-    toml = [
-        "[mcp_servers.dev-tools-browser]",
-        "command = " + json.dumps(command),
-        'args = ["browser", "mcp"]',
-        "startup_timeout_sec = 60",
-        "tool_timeout_sec = 180",
-        'env_vars = ["CODEX_THREAD_ID", "DEVTOOLS_BROWSER_SESSION", "DEVTOOLS_BROWSER_CONFIG", "DEVTOOLS_BROWSER_STATE"]',
-        "",
-    ]
-    if cfg.get("mac_browser"):
-        servers["dev-tools-mac-browser"] = {
-            "type": "stdio",
-            "command": command,
-            "args": ["browser", "mac-mcp"],
-        }
-        toml += [
-            "[mcp_servers.dev-tools-mac-browser]",
-            "command = " + json.dumps(command),
-            'args = ["browser", "mac-mcp"]',
-            "startup_timeout_sec = 60",
-            "tool_timeout_sec = 180",
-            "",
-        ]
-    print(
-        json.dumps(
-            {
-                "changed": cfg != previous,
-                "claude": {"mcpServers": servers},
-                "codex": "\n".join(toml),
-            }
-        )
-    )
+    # Browser viewer setup no longer registers agent MCPs. Native CUA routing
+    # is configured independently by mod_native_browser.
+    print(json.dumps({"changed": cfg != previous}))
 
 
 if __name__ == "__main__":

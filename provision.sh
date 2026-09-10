@@ -104,14 +104,13 @@ Usage: provision.sh [options]
   --with-browser     install native shareable browser sessions (pilot)
   --with-codex-login  enable saved Proton Pass browser-assisted Codex recovery
   --viewer-policy-reviewed  acknowledge tailnet viewer access review; save once
-  --with-mac-browser URL  also configure optional Mac MCP; owner approval required
-  --mac-browser-proxy URL outbound HTTP proxy for userspace Tailscale on Linux
+  --native-browser-socket PATH  override the Mac relay UNIX socket
   --debug            verbose
   -h, --help         this help
 
 Steps: mod_base mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
-       mod_uv mod_ripgrep mod_g2 mod_browser
+       mod_uv mod_ripgrep mod_g2 mod_browser mod_native_browser
 EOF
 }
 
@@ -125,13 +124,11 @@ while [ $# -gt 0 ]; do
         --with-browser) DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_BROWSER_ENABLED; shift ;;
         --viewer-policy-reviewed) DEVTOOLS_VIEWER_POLICY_REVIEWED=1; export DEVTOOLS_VIEWER_POLICY_REVIEWED; shift ;;
         --with-codex-login) DEVTOOLS_CODEX_LOGIN_WITH_PASS=1; DEVTOOLS_BROWSER_ENABLED=1; export DEVTOOLS_CODEX_LOGIN_WITH_PASS DEVTOOLS_BROWSER_ENABLED; shift ;;
-        --with-mac-browser)
-            [ $# -ge 2 ] || { err "--with-mac-browser needs an HTTPS endpoint"; exit 2; }
-            DEVTOOLS_BROWSER_ENABLED=1; DEVTOOLS_MAC_BROWSER_ENDPOINT=$2
-            export DEVTOOLS_BROWSER_ENABLED DEVTOOLS_MAC_BROWSER_ENDPOINT; shift 2 ;;
-        --mac-browser-proxy)
-            [ $# -ge 2 ] || { err "--mac-browser-proxy needs a URL"; exit 2; }
-            DEVTOOLS_MAC_BROWSER_PROXY=$2; export DEVTOOLS_MAC_BROWSER_PROXY; shift 2 ;;
+        --native-browser-socket)
+            [ $# -ge 2 ] || { err "--native-browser-socket needs a path"; exit 2; }
+            DEVTOOLS_NATIVE_BROWSER_SOCKET=$2; export DEVTOOLS_NATIVE_BROWSER_SOCKET; shift 2 ;;
+        --with-mac-browser|--mac-browser-proxy)
+            err "Legacy Mac MCP removed; use dev-tools native-browser install-mac --ssh-host HOST on your Mac"; exit 2 ;;
         --debug) DEVTOOLS_DEBUG=1; export DEVTOOLS_DEBUG; shift ;;
         -h|--help) usage; exit 0 ;;
         *) err "unknown option: $1"; usage; exit 2 ;;
@@ -149,7 +146,8 @@ step "secrets"         mod_secrets
 step "shell env"       mod_shell
 step "github cli"      mod_github
 step "claude code"     mod_claude
-step "browser"         mod_browser
+step "native browser"  mod_native_browser
+step "browser viewer"  mod_browser
 step "codex"           mod_codex
 step "agent skills"    mod_skills
 step "ssh keys"        mod_sshid

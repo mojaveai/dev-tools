@@ -1,9 +1,10 @@
 # Shareable Linux browser sessions
 
-The agent controls a browser on the Linux machine with local Playwright MCP.
-You open a private noVNC URL to see **that same browser** and enter a login when
-needed. Your Mac need not be online; any authorized tailnet device can view it.
-No Docker, XQuartz, public listener, or SSH port-forward is required.
+This is the optional Linux/noVNC viewer fallback. Agent browser control now uses
+[native cua_repl routing](native-browser.md). The legacy Playwright MCP and Mac
+MCP are removed by provisioning. These viewer sessions remain available for
+manual interaction and existing authentication helpers; they are not automatically
+the same browser controlled by native CUA.
 
 ## Install and rerun
 
@@ -28,7 +29,7 @@ the launcher does not disable Chromium's sandbox to accommodate root.
 An unsuitable platform or lack of package privileges is reported as `SKIP`.
 An interrupted download/install is a failure that a rerun repairs.
 
-- Native desktop packages come from the distribution; Playwright MCP and its
+- Native desktop packages come from the distribution; the Playwright library and its
   compatible Chromium are pinned by `config/browser/package-lock.json`.
 - A fully provisioned host checks installed packages, runtime identity, browser
   dependencies and owned configuration. It does not refresh apt indexes, fetch
@@ -37,9 +38,8 @@ An interrupted download/install is a failure that a rerun repairs.
   reruns, even without repeating `--with-browser`. `--skip mod_browser` skips it.
 - Browser setup never runs `codex login`, `claude login`, `tailscale up`, or vault
   authentication. Existing CLI authentication and browser profiles are retained.
-- `dev-tools-browser` is added to Codex and Claude Code's user MCP configuration.
-  Existing servers, settings, authentication and the old `mac-chrome` server are
-  preserved. Restart/reconnect the agent once to discover the added tools.
+- Browser setup does not register agent MCPs. Normal provisioning runs
+  `mod_native_browser` separately to migrate the old entries.
 
 ## Chromium sandbox on Ubuntu
 
@@ -131,91 +131,15 @@ the container. Do not start a second daemon over an existing workspace setup.
 
 ## Agent and human collaboration
 
-Agents normally use the registered MCP without manual startup. Each MCP launcher
-selects the current Codex task ID, `DEVTOOLS_BROWSER_SESSION` if supplied, or a
-fresh generated session ID. Task identities are hashed before becoming directory
-names. Explicit names can be supplied to `dev-tools browser mcp NAME`.
+Start viewer sessions explicitly with `dev-tools browser start NAME --json`.
+Use the returned session ID for status, handoff and cleanup. Native `cua_repl`
+uses its own tab/session lifecycle; do not infer a viewer session from its MCP
+connection or attach multiple controllers to the same browser profile.
 
-The launcher prints its session ID and viewer state to **stderr**, leaving stdout
-for the upstream MCP protocol. The helper's `list`/`status` commands expose the
-same metadata. The bundled `shared-browser` skill explains how to find and share
-the URL, and how to wait for user input. For clients without task identity,
-set a distinct `DEVTOOLS_BROWSER_SESSION` per task when launching that client;
-otherwise use the generated ID from its MCP startup log. Never set one global
-session name for every task.
+## Mac browser control
 
-The viewer starts in **view-only** mode. To enter a login:
-
-1. Ask the agent to pause browser actions and wait for it to stop.
-2. Enable input using noVNC's settings and enter the login in the live browser.
-3. Tell the agent to resume, optionally returning the viewer to view-only mode.
-
-Input mode does not acquire a lock or automatically pause an agent. Do not
-paste credentials into the task. Modern browser passkeys tied to a local Mac
-may require another authentication method; the optional Mac capability can be
-used when the task really needs that Mac's browser state.
-
-Closing the viewer, ending an MCP connection or dropping SSH leaves the native
-session running. Reattaching the same session reaches the same browser. Only one
-agent MCP client can attach to a named session at a time. Other tasks use
-independent profiles, displays, browser processes and viewer ports.
-
-```sh
-dev-tools browser list --json
-dev-tools browser status my-task --json
-dev-tools browser stop my-task
-dev-tools browser start my-task       # restart with its saved profile
-dev-tools browser delete-profile my-task --yes  # requires a stopped session
-```
-
-`stop` removes only an owned Serve route and the session's processes. If
-Tailscale is unavailable during cleanup, route ownership is retained for a
-later retry. The helper does not remove routes someone else changed, delete
-another X display's lock, or kill every Chrome process. Processes are identified
-by PID, Linux start time and boot ID to avoid signalling reused PIDs.
-
-The default limit is eight live sessions per Linux user; adjust `max_sessions`
-in the local config if needed. Sessions are not silently evicted. Browser RAM
-remains in use until the session stops. After a host reboot, processes restart
-on demand with the retained profile rather than automatically restoring every
-old task. Browser profiles are not backed up or copied between hosts.
-
-## Optional Mac browser
-
-The Linux-local browser works without any Mac access. To configure the option:
-
-```sh
-./provision.sh --with-mac-browser https://MAC.TAILNET.ts.net/mcp
-# Containers using dev-tools' Tailscale HTTP proxy:
-./provision.sh --with-mac-browser https://MAC.TAILNET.ts.net/mcp \
-  --mac-browser-proxy http://127.0.0.1:1056
-```
-
-This registers a separate `dev-tools-mac-browser` MCP client in a **pending**
-state. It uses the existing `mcp-remote` adapter, not a custom transport. No Mac
-extension token is copied to Linux.
-
-The Mac owner separately runs Playwright MCP with its browser extension in a
-dedicated automation profile, serves that MCP HTTP endpoint privately through
-Tailscale, and authorizes this Linux machine in tailnet policy and the extension.
-That Mac service is not installed remotely by this Linux provisioner. The
-currently working Mac SSH tunnel is left intact.
-
-After the owner has approved that access:
-
-```sh
-dev-tools browser approve-mac
-# Disable this client again:
-dev-tools browser revoke-mac
-```
-
-The local approval flag prevents accidental use; it is not protection against a
-hostile agent with the same Linux account. The actual boundary is Mac-side
-network policy and extension authorization. Revoking an already active session
-also requires disconnecting it in the Mac extension or removing network access.
-Rerunning provisioning against the same endpoint preserves approval and the
-adapter's authentication cache. Changing the endpoint/proxy requires fresh
-approval. No interactive authentication is attempted by installation.
+Use the [native SSH relay setup](native-browser.md). The old HTTPS Mac MCP,
+`approve-mac` commands and `mcp-remote` proxy are retired.
 
 ## Files and service model
 
@@ -246,7 +170,7 @@ node tests/browser-live.mjs
 ```
 
 The live test uses temporary profiles and synthetic login state. It exercises
-real Playwright MCP, two native desktops, noVNC input, reconnects, persisted
+the retained Playwright library, two native desktops, noVNC input, reconnects, persisted
 login, loopback binding and session-scoped cleanup. It deliberately does not
 claim to test another device's tailnet access.
 
@@ -288,7 +212,7 @@ state within about a second.
 returns to view-only without recording human completion. Stopping the session
 cancels pending input. Handoff messages should describe the task, never contain
 credentials. Input toggling is a collaborative convenience; the skill tells the
-agent to pause, but this does not forcibly block Playwright commands.
+agent to pause, but this does not forcibly block separate browser controllers.
 
 Installer reruns update the integration and skill. Existing legacy viewers are
 upgraded alongside their running desktop, preserving Chromium and tabs; refresh

@@ -69,7 +69,7 @@ mod_browser() {
     mkdir -p "$_browser_runtime" || return 1
     _browser_want=$(sha256sum "$REPO_DIR/config/browser/package-lock.json" | cut -d ' ' -f 1)
     _browser_have=$(cat "$_browser_runtime/.complete" 2>/dev/null || true)
-    if [ "$_browser_want" != "$_browser_have" ] || [ ! -f "$_browser_runtime/node_modules/@playwright/mcp/cli.js" ] || [ ! -f "$_browser_runtime/node_modules/mcp-remote/dist/proxy.js" ] || ! (cd "$_browser_runtime" && npm ls --all --omit=dev --silent >/dev/null 2>&1); then
+    if [ "$_browser_want" != "$_browser_have" ] || [ ! -f "$_browser_runtime/node_modules/playwright/cli.js" ] || ! (cd "$_browser_runtime" && npm ls --all --omit=dev --silent >/dev/null 2>&1); then
         cp "$REPO_DIR/config/browser/package.json" "$REPO_DIR/config/browser/package-lock.json" "$_browser_runtime/" || return 1
         (cd "$_browser_runtime" && npm ci --no-audit --no-fund) || {
             note "npm runtime incomplete; rerun to resume"; return 1;
@@ -112,16 +112,12 @@ mod_browser() {
         note "browser configuration failed"; return 1;
     }
     [ "$(printf '%s' "$_browser_patches" | jq -r '.changed')" = true ] && _browser_changed=1
-    printf '%s' "$_browser_patches" | jq -r '.codex' | toml_merge "${DEVTOOLS_CODEX_CONFIG:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
-    case $? in 0) : ;; 10) _browser_changed=1 ;; *) note "Codex browser configuration failed"; return 1 ;; esac
-    printf '%s' "$_browser_patches" | jq '.claude' | json_merge "${DEVTOOLS_CLAUDE_CONFIG:-$HOME/.claude.json}"
-    case $? in 0) : ;; 10) _browser_changed=1 ;; *) note "Claude browser configuration failed"; return 1 ;; esac
     # Upgrade the viewer endpoint for existing desktops without restarting
     # Chromium or disturbing profiles/tabs. New sessions use the new viewer.
     python3 "$REPO_DIR/browser/upgrade_viewer.py" || {
         note "browser installed; running viewer upgrade incomplete, rerun to retry"; return 1;
     }
-    note "local browser ready; dev-tools browser doctor reports viewer readiness; restart agent to load MCP"
+    note "local viewer ready; dev-tools browser doctor reports viewer readiness"
     [ "$_browser_changed" = 1 ] && return "$RC_UPDATED"
     return "$RC_OK"
 }
