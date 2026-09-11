@@ -17,6 +17,14 @@ mod_native_browser() {
         python3 "$REPO_DIR/native_browser/configure.py" "$REPO_DIR"
     fi
     case $? in 0) : ;; 10) _native_changed=1 ;; *) note "native browser migration failed; see diagnostic"; return 1 ;; esac
+    # Desktop clients may rewrite config.toml after installation. Restore a
+    # missing owned registration automatically, without an agent-side workaround.
+    if have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
+        python3 "$REPO_DIR/native_browser/repair.py" --repo "$REPO_DIR"
+        case $? in 0) : ;; 10) _native_changed=1 ;; *) note "native browser automatic repair setup failed"; return 1 ;; esac
+    else
+        warn "user systemd unavailable; native browser registration is repaired on provisioning reruns only"
+    fi
     note "cua_repl routing configured; requires desktop native runtime; reconnect MCP to load"
     [ "$_native_changed" = 1 ] && return "$RC_UPDATED"
     return "$RC_OK"

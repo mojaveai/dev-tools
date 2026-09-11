@@ -32,6 +32,12 @@ The step:
   It does not edit the bundled plugin cache or disable the plugin as a whole.
 - Preserves unrelated servers, authentication, browser profiles and viewer
   sessions. Invalid/ambiguous configuration causes an error before replacement.
+- On Linux hosts with user systemd, installs a user service and path watcher
+  that restore a missing router registration at login and after external Codex
+  configuration rewrites. Existing custom or explicitly disabled `cua_repl`
+  entries are preserved. The saved custom socket is reused. No approval policies
+  are changed and no active agent is terminated. Without user systemd, repairs
+  occur on provisioning reruns.
 - Stops installing `@playwright/mcp` and `mcp-remote`. On viewer provisioning
   reruns, `npm ci` prunes these packages from the managed viewer runtime. The
   Playwright library remains for existing viewer lifecycle and Codex login helpers.
@@ -117,6 +123,15 @@ dev-tools native-browser check --socket /tmp/nonexistent-native-relay.sock
 and approval cancellation have been verified against the native runtime; the
 full navigation/cursor workflow also depends on your agent client's approval UI.
 
+If the current task lacks `cua_repl`, reconnect MCP or start a fresh task after
+registration repair. Do not launch a custom MCP client inside a shell or
+`node_repl`: it does not inherit Codex's approval callbacks. The error
+`JavaScript execution requires an approval elicitation` can result from such
+a client initializing without elicitation support; it is not resolved by a
+blanket conversational approval. Inspect automatic repair with
+`systemctl --user status dev-tools-native-browser-repair.path` and
+`journalctl --user -u dev-tools-native-browser-repair.service`.
+
 Local fallback uses the host's existing native browser setup. It does **not**
 automatically attach that runtime to a dev-tools noVNC session. The noVNC viewer
 remains a separate manual fallback; identify the actual browser/tab before
@@ -142,6 +157,8 @@ an existing task lost its connection or selected local fallback during the outag
 To restore unwrapped local CUA, remove `[mcp_servers.cua_repl]` and the
 `[plugins."unified-computer-use@openai-bundled".mcp_servers.cua_repl]` override from
 Codex configuration, then reconnect MCP. Existing browser profiles are untouched.
+First disable automatic registration repair with
+`systemctl --user disable --now dev-tools-native-browser-repair.path dev-tools-native-browser-repair.service`.
 
 Native internals can change across desktop releases. Each connection loads the
 most recently updated installed native runtime configuration. Generic MCP

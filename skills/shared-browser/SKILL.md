@@ -16,7 +16,16 @@ to make the Mac route succeed.
 
 `dev-tools native-browser check` reports current route availability but does not
 change the destination of an existing connection. Native tools require genuine
-Codex task/turn metadata and approval callbacks; do not manufacture approvals.
+Codex task/turn metadata and approval callbacks from the registered MCP connection;
+do not manufacture approvals. If `cua_repl` is missing from available tools,
+reconnect MCP or start a fresh task. Installation automatically restores a missing
+registration on Linux hosts with user systemd. `check` only checks the route,
+not the current task's tool registration or approval support.
+
+Do not launch the native runtime from a shell or `node_repl` and build a custom
+MCP client. That client does not inherit Codex's approval handling. `JavaScript
+execution requires an approval elicitation` indicates a client integration
+problem; asking for blanket user permission cannot configure a missing callback.
 
 For an explicitly requested noVNC fallback, use `dev-tools browser start NAME
 --json` and share the returned `viewer_url`. These are separate viewer sessions;

@@ -18,6 +18,8 @@ def load(name,file):
     spec=importlib.util.spec_from_file_location(name,REPO/'native_browser'/file)
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 cfg=load('native_config','configure.py');r=load('native_router','router.py');relay=load('native_relay','relay.py')
+sys.path.insert(0, str(REPO/'native_browser'))
+repair=load('native_repair','repair.py')
 
 class MigrationTests(unittest.TestCase):
     def setUp(self):
@@ -68,6 +70,41 @@ startup_timeout_sec = 99
         text='[mcp_servers."dev-tools-browser"] # comment\ncommand="old"\n[[hooks.Stop]]\nmatcher="x"\n'
         self.codex.write_text(text);cfg.configure(REPO,self.codex,self.claude)
         self.assertEqual([{'matcher':'x'}],tomllib.loads(self.codex.read_text())['hooks']['Stop'])
+
+    def test_automatic_repair_restores_orphaned_plugin_override(self):
+        self.codex.write_text('model="keep"\n[mcp_servers.other]\ncommand="keep"\n'
+                              '[plugins."unified-computer-use@openai-bundled".mcp_servers.cua_repl]\nenabled=false\n')
+        self.assertTrue(repair.repair(REPO,self.codex,self.claude,'/private/custom.sock'))
+        parsed=tomllib.loads(self.codex.read_text())
+        self.assertEqual('keep',parsed['model'])
+        self.assertEqual('keep',parsed['mcp_servers']['other']['command'])
+        self.assertIn('/private/custom.sock',parsed['mcp_servers']['cua_repl']['args'])
+        before=self.codex.stat().st_mtime_ns
+        self.assertFalse(repair.repair(REPO,self.codex,self.claude))
+        self.assertEqual(before,self.codex.stat().st_mtime_ns)
+
+    def test_automatic_repair_preserves_disabled_or_custom_registration(self):
+        for entry in ['enabled=false\n', 'command="custom"\n']:
+            text='[mcp_servers.cua_repl]\n'+entry
+            self.codex.write_text(text)
+            self.assertFalse(repair.repair(REPO,self.codex,self.claude))
+            self.assertEqual(text,self.codex.read_text())
+
+    def test_automatic_repair_refuses_malformed_config(self):
+        self.codex.write_text('[broken')
+        with self.assertRaises(ValueError):repair.repair(REPO,self.codex,self.claude)
+        self.assertEqual('[broken',self.codex.read_text())
+
+    def test_installed_watcher_persists_custom_config_and_socket(self):
+        units=self.root/'units'
+        with patch.object(repair.subprocess,'run') as run:
+            self.assertTrue(repair.install(REPO,self.codex,self.claude,units,'/custom/browser.sock'))
+            self.assertFalse(repair.install(REPO,self.codex,self.claude,units,'/custom/browser.sock'))
+        service=(units/(repair.UNIT+'.service')).read_text()
+        self.assertIn(str(self.codex),service)
+        self.assertIn('/custom/browser.sock',service)
+        self.assertIn('PathChanged='+str(self.codex.parent),(units/(repair.UNIT+'.path')).read_text())
+        self.assertTrue(any(call.args[0]==['systemctl','--user','enable',repair.UNIT+'.service'] for call in run.call_args_list))
 
 class RoutingTests(unittest.TestCase):
     def fake_peer(self,path,browsers=None,stall=False):
