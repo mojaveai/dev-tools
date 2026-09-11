@@ -72,9 +72,16 @@ It is built for a mobile SSH client (Termius, Blink):
 | gh | current upstream release, authenticated, wired into git |
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
+| tmux scrolling | Mouse/trackpad scrollback enabled automatically, including in an existing tmux server |
 | g2-terminal | installed from its private release |
 | Native browser control | `cua_repl`: Mac-first native Chrome control over SSH, local fallback; [setup](docs/native-browser.md) |
 | Browser viewer (pilot) | `--with-browser`: optional Linux browser with private noVNC viewing; [operations](docs/browser.md) |
+
+Mouse scrolling uses tmux's normal copy-mode bindings: scroll up to browse
+history, then scroll to the bottom or press `q` to return to the application.
+The installer keeps other tmux settings and keybindings intact. To apply just
+this configuration on an existing host, run `./provision.sh --only mod_tmux`.
+Set `DEVTOOLS_TMUX_CONFIG` if you use a custom tmux configuration path.
 
 ## How trust flows
 
