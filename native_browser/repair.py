@@ -37,13 +37,16 @@ def install(repo, codex, claude, units, socket_path=None):
     service = ('[Unit]\nDescription=Restore missing dev-tools native browser MCP registration\n'
                '[Service]\nType=oneshot\nExecStart=' + ' '.join(map(quote, args)) + '\n'
                '[Install]\nWantedBy=default.target\n')
-    # Watching the directory also catches atomic config replacement/deletion.
+    # systemd watches parents as needed for atomic replacement/deletion. Watching
+    # all of CODEX_HOME also fires on unrelated runtime traffic and can exhaust
+    # the service start limit during ordinary browser use.
     path = ('[Unit]\nDescription=Watch Codex configuration for missing browser registration\n'
-            '[Path]\nPathChanged=' + str(codex.parent).replace('%', '%%') + '\n'
+            '[Path]\nPathChanged=' + str(codex).replace('%', '%%') + '\n'
             'Unit=' + UNIT + '.service\n[Install]\nWantedBy=default.target\n')
     changed = atomic_write(units/(UNIT+'.service'), service)
     changed = atomic_write(units/(UNIT+'.path'), path) or changed
     subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
+    subprocess.run(['systemctl', '--user', 'reset-failed', UNIT+'.path', UNIT+'.service'], check=True)
     subprocess.run(['systemctl', '--user', 'enable', '--now', UNIT+'.path'], check=True)
     subprocess.run(['systemctl', '--user', 'enable', UNIT+'.service'], check=True)
     if changed:

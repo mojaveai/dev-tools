@@ -103,7 +103,8 @@ startup_timeout_sec = 99
         service=(units/(repair.UNIT+'.service')).read_text()
         self.assertIn(str(self.codex),service)
         self.assertIn('/custom/browser.sock',service)
-        self.assertIn('PathChanged='+str(self.codex.parent),(units/(repair.UNIT+'.path')).read_text())
+        self.assertIn('PathChanged='+str(self.codex)+'\n',(units/(repair.UNIT+'.path')).read_text())
+        self.assertNotIn('PathChanged='+str(self.codex.parent)+'\n',(units/(repair.UNIT+'.path')).read_text())
         self.assertTrue(any(call.args[0]==['systemctl','--user','enable',repair.UNIT+'.service'] for call in run.call_args_list))
 
 class RoutingTests(unittest.TestCase):
