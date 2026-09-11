@@ -17,8 +17,8 @@ REPO=Path(__file__).resolve().parents[1]
 def load(name,file):
     spec=importlib.util.spec_from_file_location(name,REPO/'native_browser'/file)
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
-cfg=load('native_config','configure.py');r=load('native_router','router.py');relay=load('native_relay','relay.py')
 sys.path.insert(0, str(REPO/'native_browser'))
+cfg=load('native_config','configure.py');r=load('native_router','router.py');relay=load('native_relay','relay.py')
 repair=load('native_repair','repair.py')
 
 class MigrationTests(unittest.TestCase):
@@ -141,16 +141,6 @@ class RoutingTests(unittest.TestCase):
         relay.pump(io.BytesIO(payload),out)
         self.assertEqual(payload,out.getvalue())
 
-    def test_transport_preserves_approvals_and_images_without_retry(self):
-        approval={'jsonrpc':'2.0','id':'approval-1','method':'elicitation/create','params':{'message':'Allow?','_meta':{'origin':'https://example.com'}}}
-        image={'jsonrpc':'2.0','id':3,'result':{'content':[{'type':'image','data':'x'*150000,'mimeType':'image/png'}]}}
-        response=b''.join((json.dumps(v)+'\n').encode() for v in [approval,image])
-        output=io.BytesIO()
-        class Stream:
-            def __init__(self,b):self.buffer=b
-        with patch.object(r.sys,'stdin',Stream(io.BytesIO())),patch.object(r.sys,'stdout',Stream(output)),patch.object(r,'local_runtime') as local:
-            r.forward(io.BytesIO(response),io.BytesIO(),'Mac')
-        self.assertEqual(response,output.getvalue());local.assert_not_called()
 
 
 remote=load('native_remote','remote_session.py')

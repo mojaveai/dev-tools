@@ -1,15 +1,24 @@
 # Native browser control across hosts
 
-Codex uses `cua_repl` on the agent host. At MCP connection startup, dev-tools
-checks the Mac relay for a connected Chrome extension. If it responds, native
-browser commands run on the Mac. Otherwise the installed local native CUA runtime
-runs them on the agent host. The connection remains pinned to that destination;
-reconnect MCP to select again. `js_reset` does not change machines.
+Codex uses `cua_repl` on the agent host. On the first JavaScript call, dev-tools
+checks the Mac relay for a connected Chrome extension, then checks for an actual
+local browser. An installed runtime alone does not count as a working browser.
+If neither is available, the MCP stays connected and returns a diagnostic;
+the next call retries discovery without restarting Codex. After dispatch the
+destination stays pinned until a successful `js_reset`, which permits discovery
+again. Each JavaScript result identifies the machine that handled the call.
 
 This uses the installed ChatGPT native CUA runtime and Chrome extension, including
 their normal interaction behavior and permission checks. SSH transports MCP
 requests, results and approval callbacks. There is no continuous desktop video
 stream. Screenshots still travel when an agent explicitly requests one.
+
+The Chrome extension requires the ChatGPT desktop app on the browser machine to
+remain running, as well as Chrome. Closing the desktop app removes its browser
+bridge even if the SSH tunnel is healthy. Running `codex app-server` headlessly
+does not replace that bridge. The relay recovers discovery when the desktop app
+and extension reconnect; it does not manufacture approvals or replace the native
+host. This is a desktop dependency, not an SSH transport failure.
 
 ## Agent-host installation and migration
 
@@ -106,15 +115,19 @@ Reload MCP connections or start a fresh procbox task after installation. Ask:
 > Use cua_repl. Confirm which machine this connection controls, list its
 > browsers, then open example.com and click Learn more using native controls.
 
-The MCP initialization instructions identify the selected destination. The router
+The MCP initialization instructions explain selection; each JavaScript result
+identifies its actual destination. The router
 keeps native tool descriptions, genuine session/turn metadata and approval
 messages intact. It never automatically approves a request. If the Mac disappears
-mid-action, the connection ends; requests are not replayed locally.
+mid-action, the MCP remains available but rejects further JavaScript until
+`js_reset`. Inspect the new browser state before continuing: the last action may
+already have completed, and requests are never replayed locally.
 
 On the agent host:
 
 ```sh
 dev-tools native-browser check
+dev-tools native-browser check --json
 # Exercise local selection without stopping your real relay:
 dev-tools native-browser check --socket /tmp/nonexistent-native-relay.sock
 ```
@@ -122,6 +135,9 @@ dev-tools native-browser check --socket /tmp/nonexistent-native-relay.sock
 `check` reports selection, not an authorized website interaction. Browser discovery
 and approval cancellation have been verified against the native runtime; the
 full navigation/cursor workflow also depends on your agent client's approval UI.
+It returns `unavailable` when neither route has a connected browser. JSON output
+separates missing/unreachable relay sockets, failed native discovery and a runtime
+with no browser. A successful SSH heartbeat alone is not browser readiness.
 
 If the current task lacks `cua_repl`, reconnect MCP or start a fresh task after
 registration repair. Do not launch a custom MCP client inside a shell or
@@ -148,11 +164,12 @@ socket only after stopping it. The remote `.owner` file identifies this installa
 retain it across upgrades, and remove it only when intentionally uninstalling or
 transferring ownership. Keep the matching Mac settings file across upgrades.
 
-Recovery normally takes about 20–30 seconds after a stalled connection when SSH
-is reachable (a forced-stall test recovered in 25.7 seconds). Longer outages keep
-retrying. This restores new MCP connections; an interrupted native session is not
-resumed and browser actions are never replayed automatically. Reconnect MCP if
-an existing task lost its connection or selected local fallback during the outage.
+SSH recovery normally takes about 20–30 seconds after a stalled connection when
+SSH is reachable (a forced-stall test recovered in 25.7 seconds). Longer outages
+keep retrying. A task that has not dispatched JavaScript can retry discovery as
+soon as a browser returns. After a native connection drops, use `js_reset` and
+inspect the browser; the interrupted action is never replayed. Tailscale SSH
+reauthentication still requires the user to complete the provided login link.
 
 To restore unwrapped local CUA, remove `[mcp_servers.cua_repl]` and the
 `[plugins."unified-computer-use@openai-bundled".mcp_servers.cua_repl]` override from

@@ -3,16 +3,24 @@ name: shared-browser
 description: Use native cua_repl routing on dev-tools hosts, with Mac Chrome preferred and local native fallback; identify the active browser destination and use the optional noVNC viewer for explicit manual fallback tasks.
 ---
 
-Use the `cua_repl` MCP for Codex browser work on dev-tools hosts. Its initialization
-instructions identify the selected machine. It prefers a connected Mac Chrome
-extension, otherwise the local native runtime. Follow the tool's returned API
+Use the `cua_repl` MCP for Codex browser work on dev-tools hosts. Each JavaScript
+result identifies the selected machine. It prefers a connected Mac Chrome
+extension, otherwise a connected local browser. Follow the tool's returned API
 and permission instructions. The legacy `dev-tools-browser` and
 `dev-tools-mac-browser` MCPs are retired.
 
-Selection is pinned per MCP connection. A JavaScript reset does not reselect the
-machine. If the connection fails, reconnect MCP and rediscover the destination;
-do not replay an uncertain action on another machine. Do not weaken permissions
-to make the Mac route succeed.
+Selection happens on the first `js` call with a connected browser. If neither
+machine has a browser, discovery can be retried in the same MCP connection after
+the user opens ChatGPT desktop and Chrome on the browser host. The Mac extension
+requires that desktop app; a headless Codex app-server alone does not supply it.
+`dev-tools native-browser check --json` distinguishes tunnel failures from a
+runtime with no connected browser. It reports `unavailable` when neither works.
+
+After dispatch, the destination stays pinned until `js_reset`. A successful
+reset releases it; the next `js` may select a different machine. Inspect the
+reported destination and fresh browser state before continuing. If a connection
+drops during an action, its outcome may be unknown: reset and inspect, never
+replay that action automatically. Do not weaken permissions to make a route work.
 
 `dev-tools native-browser check` reports current route availability but does not
 change the destination of an existing connection. Native tools require genuine
