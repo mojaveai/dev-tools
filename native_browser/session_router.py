@@ -102,10 +102,17 @@ class SessionRouter:
         self.dispatch_routes = {}
 
     def health(self):
+        # Retry discovery only; never retry a dispatched browser action.
         mac = mac_health(self.socket_path)
+        for _ in range(2):
+            if mac['ready'] or mac['reason'] == 'no_connected_browser': break
+            time.sleep(1)
+            mac = mac_health(self.socket_path)
         local = {'ready': False, 'reason': 'not_needed'} if mac['ready'] else local_health(self.runtime)
         route = 'mac' if mac['ready'] else 'local' if local['ready'] else None
-        return {'route': route, 'mac': mac, 'local': local}
+        return {'route': route, 'mac': mac, 'local': local,
+                'state': 'ready' if route else 'unavailable' if mac['reason'] == 'no_connected_browser' and local['reason'] == 'no_connected_browser' else 'unconfirmed',
+                'retryable': route is None, 'retry_after_seconds': 2 if route is None else 0}
 
     def connect(self, route, restore=False):
         backend = self.factory(route, self.socket_path, self.runtime)
@@ -139,14 +146,14 @@ class SessionRouter:
             return
         if name == 'js':
             if self.lost:
-                self.error(message, 'Native connection was lost. An earlier action may have completed. Call js_reset, then inspect browser state before continuing; actions are never replayed.'); return
+                self.error(message, ('Native connection was lost during an action; its outcome may be unknown. ' if getattr(self, 'uncertain_action', False) else 'Native connection was lost while idle; no browser action was pending. ') + 'Call js_reset, then inspect browser state before continuing; JavaScript bindings must be recreated. This request was not executed.'); return
             if self.pinned is None:
                 if self.pending:
                     self.error(message, 'Wait for the outstanding MCP request before selecting a browser.'); return
                 health = self.health()
                 route = health['route']
                 if route is None:
-                    self.error(message, 'No connected browser is available. Mac: ' + health['mac']['reason'] +
+                    self.error(message, 'Browser discovery did not establish a usable connection after bounded retries. A timeout does not mean Chrome is closed. Mac: ' + health['mac']['reason'] +
                         '; local: ' + health['local']['reason'] + '. Keep ChatGPT desktop and Chrome open on the browser host. The relay will rediscover browsers on the next js call; no Codex restart is needed. No JavaScript was executed.'); return
                 if self.backend is None or self.backend.route != route:
                     try: self.connect(route, restore=True)
@@ -185,6 +192,8 @@ class SessionRouter:
         self.backend = None
         backend.close()
         self.lost = self.pinned is not None
+        self.uncertain_action = any(m.get('method') == 'tools/call' and m.get('params', {}).get('name') == 'js' for m in self.pending.values())
+        print(json.dumps({'timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':'browser_backend_disconnected','route':self.pinned,'action_outcome_unknown':self.uncertain_action}),file=sys.stderr,flush=True)
         pending, self.pending = self.pending, {}
         self.dispatch_routes.clear()
         for message in pending.values():

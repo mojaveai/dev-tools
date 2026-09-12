@@ -182,3 +182,20 @@ most recently updated installed native runtime configuration. Generic MCP
 registration may not get bundled automatic turn-end hooks; callers should use
 `turn_ended` with their actual task/turn identifiers when supported. Unexpectedly
 disconnected sessions may need tab cleanup. Avoid sharing one tab between agents.
+
+### Recovery during network path changes
+
+The Mac tunnel allows up to 60 seconds for a heartbeat response; the remote
+lease allows 75 seconds so it does not expire before the Mac's deadline. SSH
+keepalives use the same 60-second tolerance. A closed connection reconnects
+after two seconds. Tunnel replacement keeps the relay listener process alive,
+but an actual broken SSH stream still loses its attached JavaScript session.
+No browser actions are replayed. Reset and recreate bindings after stream loss.
+
+Discovery retries transient failures up to three probes, with one-second gaps.
+`check --json` reports `state: unconfirmed` when discovery times out or the
+transport/runtime cannot be verified. This does not establish that Chrome is
+closed. `unavailable` means both runtimes reported no connected browser.
+Timestamped JSON events in the Mac supervisor log identify tunnel generations,
+connection establishment and reconnects. Router disconnect events distinguish
+idle losses from browser actions with uncertain outcomes.

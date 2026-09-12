@@ -68,23 +68,30 @@ def install(host, repair_root_socket=False):
     print('On the agent host, run dev-tools native-browser check to verify Chrome discovery.')
 
 def supervise(config_path):
-    cfg=json.loads(Path(config_path).read_text());children=[];running=True
+    cfg=json.loads(Path(config_path).read_text());children=[];running=True;server=None
+    def event(name, **fields):
+        print(json.dumps({'timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'event':name,**fields}),file=sys.stderr,flush=True)
     def stop(*_):
         nonlocal running
         running=False
         for p in children:
             if p.poll() is None:p.terminate()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-    def cleanup():
-        for p in children:
+    def cleanup(keep_server=False):
+        targets=[p for p in children if not (keep_server and p is server)]
+        for p in targets:
             if p.poll() is None:p.terminate()
-        for p in children:
+        for p in targets:
             try:p.wait(timeout=5)
             except subprocess.TimeoutExpired:p.kill();p.wait()
-        children.clear()
+            for stream in (p.stdin,p.stdout,p.stderr):
+                if stream is not None:stream.close()
+        children[:]=[p for p in children if p not in targets]
     try:
         while running:
-            server=subprocess.Popen([sys.executable,str(Path(__file__).with_name('relay.py')),'serve',cfg['local_socket']]);children.append(server)
+            if server is None or server.poll() is not None:
+                server=subprocess.Popen([sys.executable,str(Path(__file__).with_name('relay.py')),'serve',cfg['local_socket']]);children.append(server)
+                event('relay_started',pid=server.pid)
             for _ in range(100):
                 if not running or server.poll() is not None or Path(cfg['local_socket']).exists():break
                 time.sleep(.1)
@@ -95,18 +102,24 @@ def supervise(config_path):
             generation=str(Path(cfg['remote_socket']).with_name('nb-'+uuid.uuid4().hex[:16]+'.sock'))
             script=Path(__file__).with_name('remote_session.py').read_text()
             command='python3 -u -c '+shlex.quote(script)+' '+shlex.quote(json.dumps({**cfg,'generation':generation}))
-            tunnel=subprocess.Popen(['ssh','-x','-T','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ControlMaster=no','-o','ControlPath=none','-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2','-R',generation+':'+cfg['local_socket'],cfg['host'],command],stdin=subprocess.PIPE,stdout=subprocess.PIPE,bufsize=0);children.append(tunnel)
+            tunnel=subprocess.Popen(['ssh','-x','-T','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ControlMaster=no','-o','ControlPath=none','-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=6','-R',generation+':'+cfg['local_socket'],cfg['host'],command],stdin=subprocess.PIPE,stdout=subprocess.PIPE,bufsize=0);children.append(tunnel)
+            event('tunnel_connecting',generation=Path(generation).name)
+            connected=False
             try:
                 while running and server.poll() is None and tunnel.poll() is None:
                     tunnel.stdin.write(b'.')
-                    ready,_,_=select.select([tunnel.stdout],[],[],15)
+                    ready,_,_=select.select([tunnel.stdout],[],[],60)
                     if not ready or not os.read(tunnel.stdout.fileno(),1):
-                        print('Native tunnel heartbeat lost; reconnecting.',file=sys.stderr,flush=True)
+                        event('tunnel_heartbeat_lost',generation=Path(generation).name,exit_code=tunnel.poll())
                         break
+                    if not connected:
+                        event('tunnel_connected',generation=Path(generation).name)
+                        connected=True
                     time.sleep(2)
             except (OSError,ValueError):pass
-            cleanup()
-            if running:time.sleep(5)
+            event('tunnel_reconnecting',generation=Path(generation).name,exit_code=tunnel.poll(),relay_exit_code=server.poll())
+            cleanup(keep_server=True)
+            if running:time.sleep(2)
     finally:stop();cleanup()
 
 def main(argv=None):

@@ -39,7 +39,7 @@ def run(cfg):
         while True:
             # Both peers enforce a deadline: half-open SSH sessions cannot hold
             # a published listener indefinitely after a tailnet change.
-            ready, _, _ = select.select([sys.stdin], [], [], 15)
+            ready, _, _ = select.select([sys.stdin], [], [], 75)
             if not ready or not os.read(sys.stdin.fileno(), 1):
                 break
             os.write(sys.stdout.fileno(), b'.')

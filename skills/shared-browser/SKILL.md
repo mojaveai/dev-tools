@@ -57,3 +57,12 @@ Missing publication is diagnosed with `dev-tools browser doctor --json`.
 `browser stop ID` preserves the profile; deleting a profile is explicit cleanup.
 Do not change tailnet policy just to make a viewer reachable. Sessions share their
 OS user's privileges and are not isolation boundaries between untrusted agents.
+
+If discovery reports `unconfirmed`, `discovery_timeout`, or a transport failure,
+report that connection verification failed temporarily, not that Chrome is
+closed or absent. Discovery already performs bounded retries; after a short
+pause, retry the registered tool's discovery before declaring browser work
+blocked. After a stream loss, reset and recreate JavaScript bindings. An idle
+loss has no pending action; an in-flight action may have completed and must not
+be replayed. Never silently substitute a local browser when the user requested
+the Mac browser.
