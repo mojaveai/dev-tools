@@ -83,6 +83,19 @@ startup_timeout_sec = 99
         self.assertFalse(repair.repair(REPO,self.codex,self.claude))
         self.assertEqual(before,self.codex.stat().st_mtime_ns)
 
+    def test_fresh_install_tolerates_absent_failed_state(self):
+        import subprocess
+        commands=[]
+        def run(args, **kwargs):
+            commands.append(args)
+            if 'reset-failed' in args:
+                if kwargs.get('check'): raise subprocess.CalledProcessError(1,args)
+                return subprocess.CompletedProcess(args,1)
+            return subprocess.CompletedProcess(args,0)
+        with patch.object(repair.subprocess,'run',side_effect=run):
+            repair.install(REPO,self.codex,self.claude,self.root/'units')
+        self.assertIn(['systemctl','--user','start',repair.UNIT+'.service'],commands)
+
     def test_automatic_repair_preserves_disabled_or_custom_registration(self):
         for entry in ['enabled=false\n', 'command="custom"\n']:
             text='[mcp_servers.cua_repl]\n'+entry

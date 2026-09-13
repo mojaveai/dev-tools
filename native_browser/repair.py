@@ -46,7 +46,9 @@ def install(repo, codex, claude, units, socket_path=None):
     changed = atomic_write(units/(UNIT+'.service'), service)
     changed = atomic_write(units/(UNIT+'.path'), path) or changed
     subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
-    subprocess.run(['systemctl', '--user', 'reset-failed', UNIT+'.path', UNIT+'.service'], check=True)
+    # Fresh units may not yet be loaded and have no failed state to clear.
+    # Enable/start below remain checked and expose actual installation failures.
+    subprocess.run(['systemctl', '--user', 'reset-failed', UNIT+'.path', UNIT+'.service'], check=False, stderr=subprocess.DEVNULL)
     subprocess.run(['systemctl', '--user', 'enable', '--now', UNIT+'.path'], check=True)
     subprocess.run(['systemctl', '--user', 'enable', UNIT+'.service'], check=True)
     if changed:
