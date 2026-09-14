@@ -16,7 +16,7 @@ const child=http.createServer((req,res)=>{
  if(req.url==='/icons.css'){res.setHeader('Content-Type','text/css');return res.end('button {background-image:url(http://127.0.0.1:8803/image.png?icon);background-size:20px 20px;}');}
  res.setHeader('Content-Type','text/html');res.end(`<link rel="stylesheet" href="http://127.0.0.1:8803/icons.css"><body><button style="position:absolute;left:20px;top:100px" onclick="document.querySelector('#result').textContent='Child clicked';document.querySelector('img').src='/image.png?changed'">Child button</button><div id="result">Child ready</div><script>setTimeout(()=>{let i=new Image();i.src='/image.png';document.body.append(i)},500)</script>`);
 });
-const fixture=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><h1>Frame fixture</h1><iframe width="400" height="300" id="child" sandbox="allow-scripts allow-same-origin"></iframe><script>setTimeout(()=>document.querySelector("#child").src="http://localhost:8803/",1500)</script>');});
+const fixture=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><h1>Frame fixture</h1><input aria-label="Background field" value="Background field" style="position:absolute;left:20px;top:100px"><iframe width="400" height="300" id="child" style="position:relative;z-index:10" sandbox="allow-scripts allow-same-origin"></iframe><script>setTimeout(()=>document.querySelector("#child").src="http://localhost:8803/",1500)</script>');});
 await new Promise(r=>child.listen(8803,r));
 await new Promise(r=>fixture.listen(8802,'127.0.0.1',r));
 const worker=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname],{env:{...process.env,SHARED_BROWSER_PORT:'8801',SHARED_BROWSER_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
@@ -33,6 +33,9 @@ try {
  const frameData=()=>page.$eval('#replay iframe',e=>{const f=e.contentDocument?.querySelector('iframe'),d=f?.contentDocument;return {text:d?.body?.textContent,images:d?[...d.images].map(i=>({width:i.naturalWidth,src:i.src})):[]};});
  await wait(async()=>(await frameData()).images.some(i=>i.width>0),'child image rendering').catch(async e=>{console.log(await frameData());throw e;});
  console.log('PASS: delayed cross-origin child image renders without refresh');
+ assert.equal(await page.$('input[aria-label="Background field"]'),null,'Occluded field must not cover the iframe');
+ assert.notEqual(await page.$eval('#replay iframe',e=>e.contentDocument.querySelector('input').style.opacity),'0','The replay must paint the occluded field itself');
+ console.log('PASS: background native fields do not paint over or intercept embedded dialogs');
  const background=await page.$eval('#replay iframe',e=>{const d=e.contentDocument.querySelector('iframe').contentDocument;return d.defaultView.getComputedStyle(d.querySelector('button')).backgroundImage;});
  assert.ok(background.includes('/asset?'),background);
  const iconStatus=await page.evaluate(async value=>{const url=value.slice(5,-2);return (await fetch(url)).status;},background);assert.equal(iconStatus,200);
@@ -63,6 +66,11 @@ try {
  console.log('PASS: source and shared frame controls/images match geometry, styles, visibility and decoded dimensions');
  assert.equal(await page.$eval('#replay iframe',e=>e.contentDocument.compatMode),await sourcePage.evaluate(()=>document.compatMode));
  console.log('PASS: source document layout mode is preserved');
+ await sourcePage.evaluate(()=>document.querySelector('#child').remove());
+ await wait(()=>page.$('input[aria-label="Background field"]'),'background input restored after closing frame');
+ await page.type('input[aria-label="Background field"]',' edited');
+ await wait(()=>sourcePage.$eval('input',e=>e.value.includes(' edited')),'restored field input forwarded');
+ console.log('PASS: background native field becomes editable again when dialog closes');
 
 
 }finally{

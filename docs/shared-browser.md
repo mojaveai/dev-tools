@@ -257,9 +257,21 @@ On September 14, the procbox `captcha-ab` desktop loaded Google search without a
 challenge, then completed Google's public reCAPTCHA demo using direct noVNC
 input. The checkbox reported `aria-checked=true`. This differs from the previous
 headless profile and is not a controlled proof that headless mode alone caused
-rejection. A subsequent DOM-viewer attempt on a new tab in the same visible
-Chrome had nine source images but an empty replay challenge frame; that failure
-remains under investigation. Do not mark universal CAPTCHA handoff accepted.
+rejection. The subsequent report of nine source images versus an empty replay
+frame compared different tabs with the same URL and is retracted. Audits must
+match the active tab's `__sharedGeneration`, not rely on URL or page order.
+
+The corrected comparison exposed native editable-field overlays painting above
+the embedded challenge and potentially intercepting its taps. The viewer now
+checks replay paint order before creating a native overlay and restores the
+replay field when it is occluded. An isolated regression covers embedded dialog
+occlusion, exact child clicks, and editing the background field after dismissal.
+After this fix, the DOM viewer completed a fresh bicycle challenge in the
+visible Chrome comparison session: source and replay prompts, images and
+selection state matched, and the exact source checkbox returned
+`aria-checked=true`. The viewer also showed the green checkmark. This verifies
+one DOM-forwarded completion; the normal headless session and user devices
+still need retesting. Do not mark universal CAPTCHA handoff accepted.
 
 Temporary comparison services are `dev-tools-shared-browser-headed-test`
 (port 8792 / private HTTPS 8444) and `dev-tools-captcha-desktop-proxy`

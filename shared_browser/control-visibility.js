@@ -30,5 +30,5 @@ export function controlVisibility(source) {
     }
   }
   if(right<=left || bottom<=top)return null;
-  return {rect,clip:`inset(${top-rect.top}px ${rect.right-right}px ${rect.bottom-bottom}px ${left-rect.left}px)`};
+  return {rect,bounds:{left,top,right,bottom},clip:`inset(${top-rect.top}px ${rect.right-right}px ${rect.bottom-bottom}px ${left-rect.left}px)`};
 }

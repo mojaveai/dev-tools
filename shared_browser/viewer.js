@@ -1,5 +1,6 @@
 import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
+import { controlOcclusion } from "./control-occlusion.js";
 import { controlVisibility } from "./control-visibility.js";
 import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
@@ -123,6 +124,7 @@ function rewrite(event, tab) {
 // Keep browser-native controls in the parent document. Sandboxed replay frames
 // are visual-only: Safari blocks parent-installed handlers inside those frames.
 const controls = new Map();
+const sourceOpacity=new WeakMap();
 let overlay, overlayGeneration, layoutFrame;
 function scheduleLayout() {
   if (layoutFrame) return;
@@ -189,10 +191,17 @@ function wireFrame() {
   overlay.style.height = replayer.iframe.height+"px";
   overlay.style.transform = `scale(${scale})`;
   const seen = new Set();
+  const occlusion=controlOcclusion(doc);
+  try {
   for (const source of doc.querySelectorAll("input,textarea,select,button,a[href]")) {
     if (source.type === "hidden") continue;
     const visible=controlVisibility(source);
-    if (!visible) continue;
+    if (!visible || !occlusion.visible(source,visible)) {
+      // The replay itself must paint the field behind its modal/popover.
+      const original=sourceOpacity.get(source);
+      if(original){source.style.setProperty('opacity',original.value,original.priority);sourceOpacity.delete(source);}
+      continue;
+    }
     const {rect,clip}=visible;
     source.setAttribute("aria-hidden", "true");
     source.tabIndex=-1;
@@ -203,7 +212,10 @@ function wireFrame() {
       ["checkbox","radio","submit","button"].includes(source.type);
     // Only the native parent control draws editable text. Drawing its replay
     // copy too produces visible ghosts when scroll positions briefly differ.
-    if (!clickable) source.style.opacity="0";
+    if (!clickable) {
+      if(!sourceOpacity.has(source))sourceOpacity.set(source,{value:source.style.getPropertyValue('opacity'),priority:source.style.getPropertyPriority('opacity')});
+      source.style.opacity="0";
+    }
     let field=controls.get(id);
     if (!field) {
       field=document.createElement(clickable || fileInput ? "button" : source.tagName);
@@ -260,6 +272,7 @@ function wireFrame() {
       field.style.cursor = 'pointer';
     } else if (document.activeElement!==field) field.value=source.value;
   }
+  } finally {occlusion.dispose();}
   for (const [id,field] of controls) if (!seen.has(id)) {field.remove();controls.delete(id);}
   agentPointer.refresh();
   reveal();
