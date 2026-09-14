@@ -34,8 +34,16 @@ Procbox's operational profile is
 and `dev-tools-shared-chrome-primary.service`. It was promoted from the tested
 session; the standard MCP and port 8443 viewer now use that same session.
 The older profile remains at `~/.local/state/dev-tools/shared-browser/profile`;
-its Chrome host is retained but disabled for automatic startup. To inspect that
-older endpoint explicitly, set `SHARED_BROWSER_STATE` to its parent directory.
+its Chrome host is retained but disabled for automatic startup. Its original
+`browser-host.json` retains the older Chrome endpoint for explicit recovery.
+
+The installer keeps the original `shared-browser/server.sock` as a compatibility
+link to the selected receiver when that path is free. This lets MCP processes
+started before the profile migration keep working. It refuses to replace an
+occupied socket or ordinary file. After migration, call `cua.getState()` and
+obtain fresh tab handles; `js_reset` only resets JavaScript bindings, not the
+MCP process or its loaded tool descriptions. A fresh MCP connection is needed
+to refresh descriptions from an older installation.
 
 ## Install or update
 

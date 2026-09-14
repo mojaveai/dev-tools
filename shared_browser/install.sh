@@ -100,6 +100,7 @@ if [ "$browser_engine" = native ]; then
   systemctl --user enable --now "$browser_host_service"
 fi
 systemctl --user enable --now dev-tools-shared-browser.service
+"$node_path" "$runtime_dir/rpc-alias.mjs"
 if [ "$browser_restore" = true ]; then
   "$node_path" "$runtime_dir/migrate-engine.mjs" restore
 fi
