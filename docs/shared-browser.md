@@ -206,6 +206,6 @@ snapshot exceeded `bufferedAmount` caused a repeated full-page rebuild loop.
 `compact-images.mjs` removes repeated inline bitmaps only when the original
 image bytes already exist in the authenticated asset relay.
 
-These server changes take effect on service restart. The September 14 running
-procbox session received image compaction for its currently cached images without
-restarting Chrome; its delivery queue remains the old implementation until restart.
+These server changes take effect on service restart. Procbox was restarted with
+user approval on September 14 and its nine prior tab addresses were reopened;
+the ordered delivery queue and cached-image compaction are active there.
