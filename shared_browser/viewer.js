@@ -432,10 +432,12 @@ function connect() {
       if (m.type === "hello") clientId = m.clientId;
       if (m.type === "state") update(m);
       if (m.type === "event") eventReceived(m);
-      if (m.type === "navigation") {
-        caches.delete(m.tab);
-        if (m.tab === active) showTab(m.tab);
-      }
+      // Keep the last rendered document until replacement events arrive.
+      // Older servers also announce hash/history changes as navigation: those
+      // only emit incremental mutations, not a fresh full snapshot. Clearing
+      // here stranded the viewer on a blank page until reconnect.
+      // For real document changes, the next full snapshot replaces the cache;
+      // server generation checks reject any stale input in the meantime.
       if (m.type === "error") error(m.message);
       if (m.type === "dialog") {
         $("dialog").style.display = "block";

@@ -286,8 +286,10 @@ async function attachPage(page) {
       });
     } catch {}
   });
-  page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) {
+  // Puppeteer's framenavigated also fires for hash/history routing. Only a
+  // new top-level document invalidates the recorder and its node IDs.
+  tab.cdp.on('Page.frameNavigated', ({frame}) => {
+    if (!frame.parentId) {
       tab.chooser = null;
       uploads.releaseTab(tab.id).catch(err => console.error(err.message));
       tab.generation = null;
@@ -296,6 +298,9 @@ async function attachPage(page) {
       broadcast({ type: "navigation", tab: tab.id });
       session.update().catch(() => {});
     }
+  });
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame()) session.update().catch(() => {});
   });
   page.on("dialog", (d) => {
     tab.dialog = d;

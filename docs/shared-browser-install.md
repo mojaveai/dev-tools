@@ -82,3 +82,24 @@ reconnect, MCP reconnect and reset. Both native repair units are inactive and
 disabled. Demobox's published viewer returned HTTP 200 from the owner's Mac.
 The configuration migration test verifies unrelated settings survive and reruns
 are idempotent. All 14 shared-browser unit checks passed.
+
+## Navigation blank-screen fix (2026-09-14)
+
+Finder's hash/history routes exposed a viewer bug: Puppeteer's `framenavigated`
+also fires for same-document navigation, and the server/viewer discarded the
+recorded document even though no replacement full snapshot would follow.
+Refreshing the viewer recovered because reconnect explicitly takes a snapshot.
+
+The viewer now retains the last rendered document until subsequent events or a
+replacement full snapshot arrive. This client fix works with the already-running
+server and can be activated by refreshing the viewer, preserving the active
+Chrome task. The server additionally uses CDP's top-level `Page.frameNavigated`
+event to invalidate only genuinely new documents; history/hash navigation only
+updates tab metadata. That server change takes effect at the next deliberate
+service restart. No restart was forced during the user's active Finder task.
+
+`test/navigation-live.mjs` reproduced the hash-route failure before the fix. Its
+real viewer/browser checks pass for hash routing, pushState, and full navigation
+through a redirect, both with the old server/new viewer and with both fixes.
+This test runs on separate local ports and a disposable profile, without touching
+production portal state. All 14 shared-browser unit checks also pass.
