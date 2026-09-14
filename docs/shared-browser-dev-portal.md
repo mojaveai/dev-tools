@@ -86,3 +86,20 @@ Remove only the new `90-shared-browser-passkey.conf` drop-in, then run
 `agent-trace-qa-identity-dashboard.service`. Disable/stop the user
 `dev-tools-portal-passkey.service`. Reload the affected remote dashboard tab to
 remove the in-page hook. Keep all original units, ACLs and TLS credentials.
+
+## Phone picker hint correction
+
+The first live portal request (Manbir Development QA) contained one allowed
+credential marked `transports: ["usb"]`, hints `security-key, client-device`, and
+required user verification. The user reported that Face ID was not offered.
+The phone helper now removes transport hints and prefers `client-device` while
+preserving the exact allowCredentials IDs, challenge, RP ID, extensions and user
+verification requirement. This is client discovery/presentation only; it cannot
+make a different credential pass the original verifier. The installed live-dev
+registry on port 3581 also lists USB transport metadata for Manbir; that alone
+does not establish which passkey the user has on their phone.
+
+All 14 unit checks pass. The isolated handoff test now intentionally emits the
+same USB/security-key hints for a registered platform key; phone selection works
+and the original verifier accepts it. The real user's matching credential and
+successful dashboard sign-in still need confirmation.

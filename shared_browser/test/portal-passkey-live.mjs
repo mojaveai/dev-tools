@@ -20,7 +20,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(req.url.startsWith('/_shared-browser-passkey/')){
   const up=http.request(bridge+req.url,{method:req.method,headers:{...req.headers,'x-shared-browser-edge':'qa-dashboard'}},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});up.on('error',()=>{res.writeHead(502);res.end();});req.pipe(up);return;
  }
- if(req.url==='/options'){verified=false;request=gate.start('remote-site');const options=await gate.authenticationOptions(request.id,'phone');res.setHeader('Content-Type','application/json');res.end(JSON.stringify(options));return;}
+ if(req.url==='/options'){verified=false;request=gate.start('remote-site');const options=await gate.authenticationOptions(request.id,'phone');options.hints=['security-key','client-device'];options.allowCredentials=options.allowCredentials.map(c=>({...c,transports:['usb']}));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(options));return;}
  if(req.url==='/verify'){const parts=[];for await(const p of req)parts.push(p);await gate.approve(request.id,'phone',JSON.parse(Buffer.concat(parts)));verified=true;res.end('{}');return;}
  res.setHeader('Content-Type','text/html');res.end(site);
 }catch(e){res.writeHead(400);res.end(JSON.stringify({error:e.message}));}});
