@@ -29,3 +29,9 @@ two-second heartbeat interval. Network stalls retain the upstream 60/75-second
 deadlines and two-second reconnect backoff. Sleep, unavailable SSH, app shutdown,
 and authentication requirements still limit availability. Interrupted browser
 actions are never automatically replayed.
+
+Validation after deployment: all 32 native-browser tests passed. Controlled live
+removal of each published symlink was repaired without intervention in 0.90s on
+procbox and 1.72s on demobox. Both subsequently reported `route: mac` and
+`browser_connected`. The Mac's two tunnel sessions were reconnected to load the
+updated embedded watchdog; the desktop apps and relay listeners stayed running.
