@@ -117,3 +117,16 @@ change without restarting Chrome or Codex.
 The isolated Chromium pointer test covers target removal, post-click layout
 changes, interruption by the next action, and matching target/ripple coordinates.
 All four checks passed, alongside the 14 shared-browser unit checks.
+
+## Collapsed form control visibility (2026-09-14)
+
+The QA Finder invitation input retained a nonzero layout box inside closed
+`details`, so the native viewer overlay incorrectly exposed it. Overlay creation
+now checks closed details (preserving first-summary controls), computed visibility,
+content visibility, ancestor opacity and overflow clipping. Partially clipped
+controls receive the corresponding clip-path; fully clipped controls are removed.
+The replay input's intentional opacity zero remains compatible with native overlays.
+
+The isolated Chromium test passes expand/collapse, summary visibility, CSS-hidden
+ancestors, zero-height and partial clipping. All 14 unit checks passed. This is a
+viewer-only deployment; refresh the viewer to activate without restarting Chrome.

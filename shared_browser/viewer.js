@@ -1,3 +1,4 @@
+import { controlVisibility } from "./control-visibility.js";
 import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
 import { AgentPointer } from "./agent-pointer.js";
@@ -218,8 +219,9 @@ function wireFrame() {
   const seen = new Set();
   for (const source of doc.querySelectorAll("input,textarea,select,button,a[href]")) {
     if (source.type === "hidden") continue;
-    const rect=source.getBoundingClientRect();
-    if (!rect.width || !rect.height) continue;
+    const visible=controlVisibility(source);
+    if (!visible) continue;
+    const {rect,clip}=visible;
     source.setAttribute("aria-hidden", "true");
     source.tabIndex=-1;
     const id=replayer.getMirror().getId(source);
@@ -263,7 +265,7 @@ function wireFrame() {
     }
     }
     Object.assign(field.style,{position:"absolute",margin:"0",left:rect.left+"px",
-      top:rect.top+"px",width:rect.width+"px",height:rect.height+"px"});
+      top:rect.top+"px",width:rect.width+"px",height:rect.height+"px",clipPath:clip});
     field.setAttribute("aria-label",source.getAttribute("aria-label") ||
       [...(source.labels||[])].map(l=>l.textContent.trim()).join(" ") || source.textContent.trim() || source.name || "Field");
     if (clickable) {
