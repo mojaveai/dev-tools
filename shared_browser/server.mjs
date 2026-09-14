@@ -1,4 +1,6 @@
 import http from "node:http";
+import { compactImages } from "./compact-images.mjs";
+import { createSocketDelivery } from "./socket-delivery.mjs";
 import { createReadStream } from "node:fs";
 import { UploadStore, remoteFiles, validateSizes, MAX_BATCH_BYTES } from "./transfers.mjs";
 import { Downloads } from "./downloads.mjs";
@@ -58,15 +60,12 @@ const json = (res, data, status = 200) => {
   });
   res.end(JSON.stringify(data));
 };
+const deliver=createSocketDelivery();
 const send = (ws, data) => {
   if (ws.readyState === 1) {
-    if (ws.bufferedAmount > 8 * 1024 * 1024) {
-      ws.close(1013, "Reconnect for current snapshot");
-      return;
-    }
     const raw = JSON.stringify(data);
     session.bytesSent += Buffer.byteLength(raw);
-    ws.send(raw);
+    deliver(ws,raw);
   }
 };
 const broadcast = (data) => {
@@ -246,6 +245,7 @@ async function attachPage(page) {
     }
     if (!tab.generation) tab.generation = generation;
     if (generation !== tab.generation && event.type !== 4) return;
+    compactImages(event,tab.resources);
     const item = { type: "event", tab: tab.id, generation, event };
     tab.events.push(item);
     tab.eventBytes += JSON.stringify(item).length;

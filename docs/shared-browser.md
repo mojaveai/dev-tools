@@ -196,3 +196,16 @@ will accept a remote browser.
 Recorder bundles are loaded when the server starts. An active session can receive
 `installFrameSnapshots` in its existing frames and new-document hooks without
 closing Chrome; a normal service restart loads it for all future tabs.
+
+### Snapshot delivery under load
+
+`test/socket-delivery.test.mjs` covers ordered delivery of snapshots larger than
+8 MiB and bounded queues for stalled viewers. Delivery waits for each WebSocket
+send callback before sending the next message. Reconnecting because a single
+snapshot exceeded `bufferedAmount` caused a repeated full-page rebuild loop.
+`compact-images.mjs` removes repeated inline bitmaps only when the original
+image bytes already exist in the authenticated asset relay.
+
+These server changes take effect on service restart. The September 14 running
+procbox session received image compaction for its currently cached images without
+restarting Chrome; its delivery queue remains the old implementation until restart.
