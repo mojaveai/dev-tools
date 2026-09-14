@@ -311,6 +311,9 @@ function showTab(id) {
     {
       root: $("replay"),
       liveMode: true,
+      // This is a live page, not a paused recording. Let CSS spinners and
+      // other stylesheet animations run even while no DOM events arrive.
+      pauseAnimation: false,
       mouseTail: false,
       showWarning: false,
       UNSAFE_replayCanvas: false,

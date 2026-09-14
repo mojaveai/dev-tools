@@ -13,7 +13,7 @@ const origin='http://127.0.0.1:8801';
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/redirect'){res.writeHead(302,{Location:'/done'});return res.end();}
  res.setHeader('Content-Type','text/html');
- res.end(`<h1 id="route">${req.url==='/done'?'Full navigation done':'Initial page'}</h1><a id="hash" href="#next">Hash route</a><button id="push" onclick="history.pushState({},'', '/pushed');document.querySelector('h1').textContent='Push route done'">Push route</button><a id="full" href="/redirect">Full navigation</a><script>onhashchange=()=>document.querySelector('h1').textContent='Hash route done'</script>`);
+ res.end(`<style>@keyframes spin{to{transform:rotate(360deg)}}.spinner{width:24px;height:24px;border:3px solid gray;border-top-color:blue;border-radius:50%;animation:spin .8s linear infinite}</style><div class="spinner"></div><h1 id="route">${req.url==='/done'?'Full navigation done':'Initial page'}</h1><a id="hash" href="#next">Hash route</a><button id="push" onclick="history.pushState({},'', '/pushed');document.querySelector('h1').textContent='Push route done'">Push route</button><a id="full" href="/redirect">Full navigation</a><script>onhashchange=()=>document.querySelector('h1').textContent='Hash route done'</script>`);
 });
 await new Promise(r=>fixture.listen(8802,'127.0.0.1',r));
 const worker=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname],{env:{...process.env,SHARED_BROWSER_PORT:'8801',SHARED_BROWSER_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
@@ -29,6 +29,15 @@ try {
  const rendered=label=>page.$eval('#replay iframe',(e,label)=>e.contentDocument?.body?.textContent.includes(label),label);
  await wait(()=>rendered('Initial page'),'initial viewer snapshot');
  const act=async selector=>{const r=await rpc('js',{context:'navigation-test',code:`await tab.click(${JSON.stringify(selector)});nodeRepl.write('clicked');`});assert.ok(!r.isError,JSON.stringify(r));};
+ const spinner=()=>page.$eval('#replay iframe',e=>{
+  const d=e.contentDocument,s=d.defaultView.getComputedStyle(d.querySelector('.spinner'));
+  return {state:s.animationPlayState,transform:s.transform};
+ });
+ const first=await spinner();
+ assert.equal(first.state,'running','Live replay must not pause CSS animations');
+ await new Promise(r=>setTimeout(r,150));
+ assert.notEqual((await spinner()).transform,first.transform,'Spinner must advance without new DOM events');
+ console.log('PASS: CSS spinner advances in idle live viewer');
  await act('#hash');await wait(()=>rendered('Hash route done'),'hash route without viewer refresh');
  console.log('PASS: hash navigation renders without refresh');
  await act('#push');await wait(()=>rendered('Push route done'),'pushState route without viewer refresh');

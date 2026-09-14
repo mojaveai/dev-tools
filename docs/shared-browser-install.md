@@ -130,3 +130,13 @@ The replay input's intentional opacity zero remains compatible with native overl
 The isolated Chromium test passes expand/collapse, summary visibility, CSS-hidden
 ancestors, zero-height and partial clipping. All 14 unit checks passed. This is a
 viewer-only deployment; refresh the viewer to activate without restarting Chrome.
+
+## Live CSS animations (2026-09-14)
+
+Set rrweb's `pauseAnimation: false` for the live viewer. Its default injected
+paused-state rule froze CSS loading spinners even while live DOM updates worked.
+The isolated real-viewer test reproduced `animation-play-state: paused` before
+this change and verifies that the spinner transform advances during idle time
+afterward. Hash/history navigation and redirects still pass. This enables CSS
+animations; canvas and JavaScript-driven animations retain their existing limits.
+Refresh the viewer to load this client-only update.
