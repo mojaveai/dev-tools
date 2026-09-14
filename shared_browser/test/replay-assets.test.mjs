@@ -16,3 +16,7 @@ test('asset fragments survive and replay avoids script prefetch storms',()=>{
  assert.equal(out.data.childNodes[1].attributes.href,undefined);
  assert.equal(out.data.childNodes[2].attributes.href,'https://site.test/page');
 });
+test('legacy doctypes retain source quirks layout through rrweb rebuild',()=>{
+ const event={type:2,data:{node:{type:0,compatMode:'BackCompat',childNodes:[{type:1,name:'html',publicId:'-//W3C//DTD HTML 4.01 Transitional//EN'},{type:2,tagName:'html',attributes:{}}]}}};
+ const out=rewriteAssets(event,'tab');assert.equal(out.data.node.childNodes[0].type,2);assert.equal(event.data.node.childNodes[0].type,1);
+});

@@ -12,6 +12,11 @@ export function rewriteAssets(event, tab, pageURL='https://invalid.local/') {
   const css=text=>text.replace(/url\(\s*(['"]?)((?:https?:|\/\/)[^)'"\s]+)\1\s*\)/gi,(_,q,url)=>`url("${asset(url)}")`);
   const walk=value=>{
     if(!value || typeof value!=='object')return;
+    // rrweb 2.1.4 only initializes quirks mode when a serialized document
+    // lacks a doctype. Appending a legacy doctype later cannot change the
+    // parser mode; let rrweb create its equivalent quirks-mode doctype first.
+    if(value.type===0 && value.compatMode==='BackCompat' && value.childNodes)
+      value.childNodes=value.childNodes.filter(node=>node.type!==1);
     if(value.attributes){
       const a=value.attributes;
       for(const key of ['src','poster','xlink:href'])if(typeof a[key]==='string')a[key]=asset(a[key]);

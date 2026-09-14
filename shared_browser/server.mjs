@@ -1,4 +1,5 @@
 import http from "node:http";
+import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
 import { compactImages } from "./compact-images.mjs";
 import { createSocketDelivery } from "./socket-delivery.mjs";
 import { createReadStream } from "node:fs";
@@ -225,6 +226,7 @@ async function attachPage(page) {
     resources: new Map(),
     resourceBytes: 0,
   };
+  tab.assetDelivery=new AssetDelivery(tab.resources);
   session.tabs.set(tab.id, tab);
   tab.cdp = await page.createCDPSession();
   await tab.cdp.send('Page.enable');
@@ -284,6 +286,7 @@ async function attachPage(page) {
         bytes,
         type: response.headers()["content-type"] || "application/octet-stream",
       });
+      tab.assetDelivery.available(response.url());
     } catch {}
   });
   // Puppeteer's framenavigated also fires for hash/history routing. Only a
@@ -438,16 +441,24 @@ const httpServer = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/status") return json(res, await session.state());
     if (url.pathname === "/asset") {
-      const resource = session.tabs
-        .get(url.searchParams.get("tab"))
-        ?.resources.get(url.searchParams.get("url"));
+      const tab=session.tabs.get(url.searchParams.get("tab"));
+      const assetURL=url.searchParams.get("url");
+      if(!tab || !assetURL)return json(res,{error:"Asset unavailable"},404);
+      const controller=new AbortController();
+      const abort=()=>controller.abort();res.once('close',abort);
+      const resource=await tab.assetDelivery.get(assetURL,controller.signal);
+      res.off('close',abort);
+      if(controller.signal.aborted)return;
       if (!resource) return json(res, { error: "Asset unavailable" }, 404);
+      const bytes=/^text\/css(?:;|$)/i.test(resource.type)
+        ? Buffer.from(rewriteStylesheet(resource.bytes.toString('utf8'),tab.id,assetURL))
+        : resource.bytes;
       res.writeHead(200, {
         "Content-Type": resource.type,
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=60",
       });
-      return res.end(resource.bytes);
+      return res.end(bytes);
     }
     const files = {
       "/": ["viewer.html", "text/html"],

@@ -209,3 +209,23 @@ image bytes already exist in the authenticated asset relay.
 These server changes take effect on service restart. Procbox was restarted with
 user approval on September 14 and its nine prior tab addresses were reopened;
 the ordered delivery queue and cached-image compaction are active there.
+
+### Paired rendering and delayed-asset checks
+
+The embedded-frame fixture now delays image responses by 700 ms and loads icon
+CSS from a different origin. It compares source and replay control/image geometry,
+computed styles, visibility, decoded image dimensions, and document layout mode.
+This caught three gaps that an immediate local image response missed:
+
+- DOM image mutations can arrive before the source response is cached. The asset
+  route now waits up to 15 seconds for those bytes, with disconnect cleanup.
+- External stylesheet URLs must resolve against the original stylesheet and go
+  through the authenticated relay, including nested CSS imports.
+- rrweb 2.1.4 mishandles legacy doctypes in quirks-mode documents. The replay
+  adapter invokes its quirks initialization path instead of silently changing
+  the page to standards mode and shifting layout/click coordinates.
+
+A paired audit of Google's outer CAPTCHA page confirmed matching layout modes
+and measured positions after the fixes. Live challenge transitions and successful
+human completion remain acceptance checks; fixture success alone does not prove
+all vendor-specific challenge flows work.
