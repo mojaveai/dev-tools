@@ -12,13 +12,33 @@ test('recovery only reads observed visual resources, including child frames',asy
     throw Error('Unexpected network request');
   }};
   const recover=await resourceRecovery(cdp,(url,asset)=>saved.set(url,asset));
-  const reads=calls.length;
   await recover('https://not-observed.test/private');await recover('https://cdn.test/script');
-  assert.equal(calls.length,reads);
+  assert.equal(calls.some(([m])=>m==='Page.getResourceContent' || m==='Network.loadNetworkResource'),false);
   await recover('https://cdn.test/style');await recover('https://cdn.test/image');
   assert.equal(saved.get('https://cdn.test/image').bytes.toString(),'image');
   assert.equal(saved.get('https://cdn.test/style').type,'text/css');
   assert.equal(calls.at(-1)[1].frameId,'child');
+});
+
+test('recovery follows navigation and newly attached frame clients, batching concurrent misses',async()=>{
+  const saved=new Map(),calls=[];let generation='before',clients;
+  const client=frame=>({send:async(method,args)=>{
+    calls.push([frame,method,args]);
+    if(method==='Page.getResourceTree')return {frameTree:{frame:{id:frame},resources:[{url:`https://cdn.test/${generation}/${frame}.svg`,type:'Image',mimeType:'image/svg+xml'}]}};
+    if(method==='Page.getResourceContent')return {content:args.url,base64Encoded:false};
+    throw Error('Unexpected command');
+  }});
+  clients=[client('top')];
+  const recover=await resourceRecovery(()=>clients,(url,asset)=>saved.set(url,asset));
+  await recover('https://cdn.test/before/top.svg');
+  generation='after';clients.push(client('child'));
+  calls.length=0;
+  await Promise.all(['top','child'].map(frame=>recover(`https://cdn.test/after/${frame}.svg`)));
+  assert.equal(saved.get('https://cdn.test/after/child.svg').bytes.toString(),'https://cdn.test/after/child.svg');
+  assert.equal(calls.filter(([,m])=>m==='Page.getResourceTree').length,2,'one scan per current frame client for the whole batch');
+  calls.length=0;
+  await recover('https://cdn.test/before/top.svg');
+  assert.equal(calls.some(([,m])=>m==='Page.getResourceContent'),false,'previous documents do not remain on the recovery allowlist');
 });
 
 test('cached CSS backgrounds come from isolated native timing observations',async()=>{

@@ -273,23 +273,35 @@ async function attachPage(page) {
   // Begin listening before recovery/recorder setup so a loading popup cannot
   // finish its assets in the gap between those asynchronous operations.
   page.on("response", async (response) => {
+    const type = response.request().resourceType();
+    // A revalidated resource has status 304, but Chrome still supplies the
+    // cached body. response.ok() alone silently drops these images/fonts.
+    if (!["image", "font", "stylesheet"].includes(type) || (!response.ok() && response.status() !== 304))
+      return;
     try {
-      const type = response.request().resourceType();
-      if (!["image", "font", "stylesheet"].includes(type) || !response.ok())
-        return;
       const bytes = await response.buffer();
+      const contentType = response.headers()["content-type"];
+      // 304 headers may omit the original MIME type. Chrome's resource tree
+      // retains it; serving SVG bytes as octet-stream breaks Safari decoding.
+      if (!contentType && response.status() === 304) {
+        await tab.recoverResource?.(response.url());
+        return;
+      }
       remember(response.url(), {
         bytes,
-        type: response.headers()["content-type"] || "application/octet-stream",
+        type: contentType || "application/octet-stream",
       });
-    } catch {}
+    } catch {
+      await tab.recoverResource?.(response.url()).catch(() => {});
+    }
   });
   // Out-of-process frames have their own resource store. Frame.client is the
   // pinned Puppeteer API for that frame's already-enabled protocol session.
-  const resourceClients=[...new Set(page.frames().map(frame=>frame.client))];
-  tab.assetDelivery=new AssetDelivery(tab.resources,{recover:await resourceRecovery(resourceClients,(url,resource)=>{
+  const resourceClients=()=>[...new Set(page.frames().map(frame=>frame.client))];
+  tab.recoverResource=await resourceRecovery(resourceClients,(url,resource)=>{
     if(!tab.resources.has(url))remember(url,resource);
-  })});
+  });
+  tab.assetDelivery=new AssetDelivery(tab.resources,{recover:tab.recoverResource});
   await tab.cdp.send('Page.setInterceptFileChooserDialog', {enabled:true});
   tab.cdp.on('Page.fileChooserOpened', event => {
     if (!event.backendNodeId) return;

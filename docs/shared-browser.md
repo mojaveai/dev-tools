@@ -344,6 +344,25 @@ reliability or distributional equivalence**. Earlier one-off successes above
 should not be presented as acceptance evidence. Full ordered counts and limitations
 are saved with the investigation.
 
+### Cached chart icons (September 14)
+
+Artificial Analysis lab icons could render as broken images even though Chrome
+had loaded them. The relay ignored HTTP 304 responses, and its asset recovery
+allowlist was captured only when the tab first attached. After navigating from
+Google, cached icons therefore had neither captured bytes nor a recovery path.
+
+The receiver now accepts revalidated responses, recovers the original MIME type
+when 304 headers omit it, and refreshes its resource allowlist from Chrome's
+current frame tree on cache misses. Concurrent misses share a scan; new frame
+clients are included. Image recovery reads Chrome's existing resource bytes
+without issuing new image requests or reloading the source page.
+
+`SHARED_BROWSER_CHROME=/path/to/chrome node test/cached-assets-live.mjs` checks
+actual 304 responses, navigation, late images, receiver restart, and viewer
+reconnect. Set `SHARED_BROWSER_WEBKIT_MODULE` to a local Playwright module path
+to also verify image decoding in WebKit. Unit coverage checks new frame clients,
+batched scans, and removal of obsolete resource URLs from the recovery allowlist.
+
 ### Safari chart rendering and scroll responsiveness (September 14)
 
 Artificial Analysis exposed a cross-engine replay issue: its Chrome page uses
