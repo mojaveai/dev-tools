@@ -29,7 +29,16 @@ const executablePath =
   process.env.SHARED_BROWSER_CHROME || "/usr/bin/google-chrome";
 await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 const recorder = await fs.readFile(path.join(root, "dist/recorder.js"), "utf8");
-const browser = await puppeteer.launch({
+// Diagnostic attachment keeps the desktop supervisor responsible for Chrome.
+const externalBrowserURL=process.env.SHARED_BROWSER_CDP_URL;
+if(externalBrowserURL){
+  const u=new URL(externalBrowserURL);
+  if(u.protocol!=='http:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password)
+    throw Error('External browser attachment must use an uncredentialed loopback HTTP endpoint');
+}
+const browser = externalBrowserURL
+  ? await puppeteer.connect({browserURL:externalBrowserURL,defaultViewport:null})
+  : await puppeteer.launch({
   executablePath,
   headless: true,
   userDataDir: path.join(stateDir, "profile"),
@@ -718,7 +727,8 @@ async function stop() {
   if (!running) return;
   running = false;
   for (const ws of sockets) ws.close();
-  await browser.close();
+  if(externalBrowserURL)await browser.disconnect();
+  else await browser.close();
   await fs.rm(transferDir, {recursive:true, force:true});
   rpc.close();
   httpServer.close();

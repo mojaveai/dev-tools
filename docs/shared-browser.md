@@ -244,3 +244,26 @@ Opening a new viewer currently requests a fresh snapshot broadcast to existing
 viewers too. During paired audits, keep the diagnostic viewer connected across
 steps rather than repeatedly reopening it; this avoids introducing rebuilds
 that could be mistaken for an autonomous reconnect loop.
+
+### Visible-Chrome comparison session
+
+For a controlled diagnostic, `SHARED_BROWSER_CDP_URL=http://127.0.0.1:PORT`
+attaches the shared service to a separately supervised desktop Chrome. Only
+uncredentialed loopback HTTP endpoints are accepted. Stopping the shared service
+disconnects this attachment without closing Chrome; normal owned launches retain
+their existing lifecycle. Use a separate state directory, listener and viewer URL.
+
+On September 14, the procbox `captcha-ab` desktop loaded Google search without a
+challenge, then completed Google's public reCAPTCHA demo using direct noVNC
+input. The checkbox reported `aria-checked=true`. This differs from the previous
+headless profile and is not a controlled proof that headless mode alone caused
+rejection. A subsequent DOM-viewer attempt on a new tab in the same visible
+Chrome had nine source images but an empty replay challenge frame; that failure
+remains under investigation. Do not mark universal CAPTCHA handoff accepted.
+
+Temporary comparison services are `dev-tools-shared-browser-headed-test`
+(port 8792 / private HTTPS 8444) and `dev-tools-captcha-desktop-proxy`
+(port 8793 / private HTTPS 8445). The desktop proxy requires the owner's
+Tailscale identity for HTTP and validates the origin for WebSockets. It forwards
+to the `captcha-ab` desktop, whose browser/CDP listener remains loopback-only.
+The normal shared service at 8443 is separate.
