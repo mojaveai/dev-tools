@@ -325,3 +325,21 @@ existing allowed 8443 listener; no tailnet ACL changes were made. The proxy
 accepts WebSocket origins 8443 and 8445, with the same owner identity check.
 HTTP page/assets and the VNC WebSocket handshake were verified through the
 8443 tailnet URL from the Mac. Existing root and passkey routes are preserved.
+
+### Persistent desktop engine and measured CAPTCHA comparison
+
+The installer now defaults to a normal desktop Chrome process owned by
+`dev-tools-shared-chrome.service`, with local authenticated Xvfb rendering and no
+pixel forwarding. The DOM receiver attaches separately; receiver updates retain
+Chrome, cookies, live page state, and focused-tab selection. The first migration
+from the old owned headless launch reopens tab addresses but cannot retain unsaved
+DOM state. See [installation](shared-browser-install.md).
+
+The follow-up [CAPTCHA investigation](captcha-investigation.md) includes native
+Mac, native remote OS input, direct CDP, actual tailnet viewer, recorder-free,
+and headless/desktop comparisons. In the fixed 60-attempt desktop block, direct
+input completed within three rounds in 24/30 attempts and shared input in 23/30;
+both worsened late in the block. This **does not establish the requested
+reliability or distributional equivalence**. Earlier one-off successes above
+should not be presented as acceptance evidence. Full ordered counts and limitations
+are saved with the investigation.

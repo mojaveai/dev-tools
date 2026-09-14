@@ -3,10 +3,11 @@ installFrameSnapshots();
 import { record } from "@rrweb/record";
 // Each document gets a distinct generation; stale viewer input is never replayed.
 const generation = crypto.randomUUID();
+window.__sharedRecorderToken = generation;
 window.__sharedGeneration = generation;
 window.__sharedMirror = record.mirror;
 function start() {
-  if (window.__sharedStop) return;
+  if (window.__sharedRecorderToken !== generation || window.__sharedStop) return;
   window.__sharedStop = record({
     emit(event) {
       window.__sharedEmit({ generation, event }).catch(() => {});

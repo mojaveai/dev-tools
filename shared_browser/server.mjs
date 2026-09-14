@@ -16,6 +16,8 @@ import { WebSocketServer } from "ws";
 import { ActionFeedback } from "./feedback.mjs";
 import { AgentRuntime } from "./runtime.mjs";
 import { RemoteMouse } from "./remote-mouse.mjs";
+import { loopbackEndpoint } from "./browser-host.mjs";
+import { resourceRecovery } from "./resource-recovery.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const stateDir =
@@ -32,12 +34,25 @@ await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 const recorder = await fs.readFile(path.join(root, "dist/recorder.js"), "utf8");
 // Diagnostic attachment keeps the desktop supervisor responsible for Chrome.
 const externalBrowserURL=process.env.SHARED_BROWSER_CDP_URL;
+const nativeEngine=process.env.SHARED_BROWSER_ENGINE==='native';
+let managedEndpoint;
+if(nativeEngine && !externalBrowserURL){
+  for(let i=0;i<150;i++){
+    try {
+      const host=JSON.parse(await fs.readFile(path.join(stateDir,'browser-host.json'),'utf8'));
+      managedEndpoint=loopbackEndpoint(host.browserWSEndpoint);break;
+    }catch(error){if(i===149)throw Error('Native Chrome is not ready; check dev-tools-shared-chrome.service: '+error.message);}
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+}
 if(externalBrowserURL){
   const u=new URL(externalBrowserURL);
   if(u.protocol!=='http:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password)
     throw Error('External browser attachment must use an uncredentialed loopback HTTP endpoint');
 }
-const browser = externalBrowserURL
+const browser = managedEndpoint
+  ? await puppeteer.connect({browserWSEndpoint:managedEndpoint,defaultViewport:null})
+  : externalBrowserURL
   ? await puppeteer.connect({browserURL:externalBrowserURL,defaultViewport:null})
   : await puppeteer.launch({
   executablePath,
@@ -104,6 +119,7 @@ const session = {
   async state() {
     return {
       sessionId: this.id,
+      engine: managedEndpoint ? 'native' : externalBrowserURL ? 'attached' : process.env.SHARED_BROWSER_HEADLESS==='false' ? 'headed-automation' : 'headless',
       viewerUrl: publicOrigin + "/",
       controller: this.controller,
       message: this.message,
@@ -129,6 +145,9 @@ const session = {
       });
     }
     return actionFeedback.run({tab:tab.id,generation:tab.generation,kind,...target},action);
+  },
+  async feedbackPoint(tab,point,kind,action) {
+    return actionFeedback.run({tab:tab.id,generation:tab.generation,kind,...point},action);
   },
   agentAction(fn) {
     return serial(async () => {
@@ -237,10 +256,40 @@ async function attachPage(page) {
     resources: new Map(),
     resourceBytes: 0,
   };
-  tab.assetDelivery=new AssetDelivery(tab.resources);
   session.tabs.set(tab.id, tab);
   tab.cdp = await page.createCDPSession();
   await tab.cdp.send('Page.enable');
+  const remember=(url,resource)=>{
+    if(resource.bytes.length>8*1024*1024)return;
+    const old=tab.resources.get(url);
+    if(old){tab.resourceBytes-=old.bytes.length;tab.resources.delete(url);}
+    while(tab.resources.size && (tab.resources.size>=300 || tab.resourceBytes+resource.bytes.length>64*1024*1024)){
+      const key=tab.resources.keys().next().value;
+      tab.resourceBytes-=tab.resources.get(key).bytes.length;tab.resources.delete(key);
+    }
+    tab.resourceBytes+=resource.bytes.length;tab.resources.set(url,resource);
+    tab.assetDelivery?.available(url);
+  };
+  // Begin listening before recovery/recorder setup so a loading popup cannot
+  // finish its assets in the gap between those asynchronous operations.
+  page.on("response", async (response) => {
+    try {
+      const type = response.request().resourceType();
+      if (!["image", "font", "stylesheet"].includes(type) || !response.ok())
+        return;
+      const bytes = await response.buffer();
+      remember(response.url(), {
+        bytes,
+        type: response.headers()["content-type"] || "application/octet-stream",
+      });
+    } catch {}
+  });
+  // Out-of-process frames have their own resource store. Frame.client is the
+  // pinned Puppeteer API for that frame's already-enabled protocol session.
+  const resourceClients=[...new Set(page.frames().map(frame=>frame.client))];
+  tab.assetDelivery=new AssetDelivery(tab.resources,{recover:await resourceRecovery(resourceClients,(url,resource)=>{
+    if(!tab.resources.has(url))remember(url,resource);
+  })});
   await tab.cdp.send('Page.setInterceptFileChooserDialog', {enabled:true});
   tab.cdp.on('Page.fileChooserOpened', event => {
     if (!event.backendNodeId) return;
@@ -270,36 +319,12 @@ async function attachPage(page) {
     broadcast(item);
   });
   await page.evaluateOnNewDocument(recorder);
-  await page.evaluate(recorder).catch(() => {});
-  page.on("response", async (response) => {
-    try {
-      const type = response.request().resourceType();
-      if (!["image", "font", "stylesheet"].includes(type) || !response.ok())
-        return;
-      const bytes = await response.buffer();
-      if (bytes.length > 8 * 1024 * 1024) return;
-      const old = tab.resources.get(response.url());
-      if (old) {
-        tab.resourceBytes -= old.bytes.length;
-        tab.resources.delete(response.url());
-      }
-      while (
-        tab.resources.size &&
-        (tab.resources.size >= 300 ||
-          tab.resourceBytes + bytes.length > 64 * 1024 * 1024)
-      ) {
-        const key = tab.resources.keys().next().value;
-        tab.resourceBytes -= tab.resources.get(key).bytes.length;
-        tab.resources.delete(key);
-      }
-      tab.resourceBytes += bytes.length;
-      tab.resources.set(response.url(), {
-        bytes,
-        type: response.headers()["content-type"] || "application/octet-stream",
-      });
-      tab.assetDelivery.available(response.url());
-    } catch {}
-  });
+  // Preserve the existing document's recorder and mirror when reconnecting.
+  // Re-evaluating rrweb creates another iframe message mapper; stopping record
+  // does not remove that mapper in 2.1.4. New documents receive the new bundle.
+  const recorded=await page.evaluate(()=>!!(window.__sharedStop && window.__sharedMirror && window.__sharedSnapshot)).catch(()=>false);
+  if(recorded)await page.evaluate(()=>window.__sharedSnapshot());
+  else for(const frame of page.frames())await frame.evaluate(recorder).catch(() => {});
   // Puppeteer's framenavigated also fires for hash/history routing. Only a
   // new top-level document invalidates the recorder and its node IDs.
   tab.cdp.on('Page.frameNavigated', ({frame}) => {
@@ -349,6 +374,10 @@ browser.on("targetcreated", async (target) => {
   }
 });
 for (const page of await browser.pages()) await attach(page);
+// Reconnecting a receiver must follow Chrome's current page, not the first
+// tab returned by CDP. Otherwise the viewer silently jumps to an older tab.
+const existingVisibility=await Promise.all([...session.tabs.values()].map(async tab=>({tab,...await tab.page.evaluate(()=>({visible:document.visibilityState==='visible',focused:document.hasFocus()})).catch(()=>({}))})));
+session.active=(existingVisibility.find(t=>t.visible&&t.focused)||existingVisibility.find(t=>t.visible))?.tab.id||session.active;
 await downloads.start(browser);
 const runtime = new AgentRuntime(session);
 async function body(req, max = 200000) {
@@ -734,7 +763,7 @@ async function stop() {
   if (!running) return;
   running = false;
   for (const ws of sockets) ws.close();
-  if(externalBrowserURL)await browser.disconnect();
+  if(externalBrowserURL || managedEndpoint)await browser.disconnect();
   else await browser.close();
   await fs.rm(transferDir, {recursive:true, force:true});
   rpc.close();

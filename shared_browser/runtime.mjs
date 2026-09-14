@@ -2,7 +2,7 @@ import vm from "node:vm";
 import { parse } from "acorn";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export const instructions = `Shared remote Chrome control on this host. Use the viewerUrl from cua.getState() to identify the host and share viewing access. Use js with persistent JavaScript bindings and await. First call: await cua.getState(). Then const browser = await cua.getBrowser(); const tab = await browser.tabs.get(TAB_ID), or await cua.getTab(TAB_ID). Browser supports tabs.list(), tabs.new(url), tabs.get(id). Tab supports goto(url), getState(), getAXState(), domSnapshot(), screenshot(), getScreenshot(), back(), forward(), reload(), close(), click(nodeIdOrSelector), setValue(nodeId,text), typeText(text), type(selector,text), pressKey(key), scroll({x,y}), select(selector,value), handleDialog({accept,text}), setFiles(nodeIdOrSelector,absoluteRemotePaths), chooseFiles(absoluteRemotePaths) for a pending custom picker, getDownloads(). tab.playwright.getByRole(role,{name,exact}), getByText(text,{exact}), getByLabel(text), locator(css) support click(), fill(text), innerText(), count(). This locator syntax is optional; plain tab methods work. nodeRepl.write(value) emits observations. nodeRepl.emitImage(await tab.screenshot()) emits an image. cua.requestHumanInput(message) displays a request in the viewer without locking either participant. cua.getState() includes the authenticated viewer URL and active controller. Humans and agents share access; actions execute in order. Re-observe before acting and after reconnect. No actions are automatically replayed. js_reset clears bindings without closing Chrome. Uploads support up to 10 files, 10 MB each and 20 MB total. Paths refer to the remote browser host. Download records include private remote paths when complete. This is a browser-only pilot. Do not claim support for native desktop apps, hardware passkey forwarding, or unsupported rendered content.`;
+export const instructions = `Shared remote Chrome control on this host. Use the viewerUrl from cua.getState() to identify the host and share viewing access. Use js with persistent JavaScript bindings and await. First call: await cua.getState(). Then const browser = await cua.getBrowser(); const tab = await browser.tabs.get(TAB_ID), or await cua.getTab(TAB_ID). Browser supports tabs.list(), tabs.new(url), tabs.get(id). Tab supports goto(url), getState(), getAXState(), domSnapshot(), screenshot(), getScreenshot(), back(), forward(), reload(), close(), click(nodeIdOrSelectorOrCoordinates), setValue(nodeId,text), typeText(text), type(selector,text), pressKey(key), scroll({x,y}), select(selector,value), handleDialog({accept,text}), setFiles(nodeIdOrSelector,absoluteRemotePaths), chooseFiles(absoluteRemotePaths) for a pending custom picker, getDownloads(). tab.playwright.getByRole(role,{name,exact}), getByText(text,{exact}), getByLabel(text), locator(css) support click(), fill(text), innerText(), count(). Coordinates use tab.click([x,y]) in source viewport CSS pixels and work inside cross-origin frames. This locator syntax is optional; plain tab methods work. nodeRepl.write(value) emits observations. nodeRepl.emitImage(await tab.screenshot()) emits an image. cua.requestHumanInput(message) displays a request in the viewer without locking either participant. cua.getState() includes the authenticated viewer URL and active controller. Humans and agents share access; actions execute in order. Re-observe before acting and after reconnect. No actions are automatically replayed. js_reset clears bindings without closing Chrome. Uploads support up to 10 files, 10 MB each and 20 MB total. Paths refer to the remote browser host. Download records include private remote paths when complete. This is a browser-only pilot. Do not claim support for native desktop apps, hardware passkey forwarding, or unsupported rendered content.`;
 
 function names(pattern) {
   if (pattern.type === "Identifier") return [pattern.name];
@@ -201,10 +201,18 @@ export class AgentRuntime {
         reload: () =>
           mutation(() => page.reload({ waitUntil: "domcontentloaded" })),
         close: () => mutation(() => page.close()),
-        click: (target) =>
-          typeof target === "number"
+        click: (target) => {
+          if(Array.isArray(target)) {
+            if(target.length!==2 || !target.every(Number.isFinite))throw Error('Coordinates must be [x, y] with finite numbers');
+            const [x,y]=target;
+            return mutation(()=>s.feedbackPoint
+              ? s.feedbackPoint(tab,{x,y},'click',()=>page.mouse.click(x,y))
+              : page.mouse.click(x,y));
+          }
+          return typeof target === "number"
             ? mutation(() => byNode(target, clickElement))
-            : locator("css", target).click(),
+            : locator("css", target).click();
+        },
         setFiles: (target, paths) => typeof target === "number"
           ? mutation(() => byNode(target, n => s.setFiles(tab, n, paths)))
           : locator("css", target).setInputFiles(paths),

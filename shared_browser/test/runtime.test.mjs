@@ -41,3 +41,13 @@ test("persistent browser handles retain mutation authority across tool calls", a
   await r.execute("a", "const tab = await browser.tabs.new();");
   assert.equal(changed, 1);
 });
+
+test('native-style coordinate clicks retain feedback and target the browser viewport',async()=>{
+  const events=[];
+  const tab={id:'coordinates',generation:'doc',page:{bringToFront:async()=>events.push('front'),mouse:{click:async(x,y)=>events.push(['click',x,y])}}};
+  const r=new AgentRuntime({...session,tabs:new Map([[tab.id,tab]]),agentAction:async fn=>fn(),feedbackPoint:async(t,p,kind,fn)=>{events.push([kind,p.x,p.y,t.generation]);return fn();}});
+  await r.execute('a','const tab=await cua.getTab("coordinates"); await tab.click([42.5, 87]);');
+  assert.deepEqual(events,['front',['click',42.5,87,'doc'],['click',42.5,87]]);
+  await assert.rejects(r.execute('a','await tab.click([NaN, 1]);'),/finite/);
+  assert.equal(events.length,3);
+});

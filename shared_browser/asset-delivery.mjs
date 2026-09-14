@@ -2,7 +2,7 @@
 // viewer request pending until those bytes arrive instead of returning a sticky
 // broken image. This never fetches URLs independently of the source browser.
 export class AssetDelivery {
-  constructor(resources,{timeoutMs=15000}={}){this.resources=resources;this.timeoutMs=timeoutMs;this.pending=new Map();}
+  constructor(resources,{timeoutMs=15000,recover}={}){this.resources=resources;this.timeoutMs=timeoutMs;this.pending=new Map();this.recover=recover;this.recovering=new Map();}
   get(url,signal){
     if(this.resources.has(url))return Promise.resolve(this.resources.get(url));
     if(signal?.aborted)return Promise.resolve(undefined);
@@ -12,6 +12,10 @@ export class AssetDelivery {
       const abort=()=>finish(undefined);
       const set=this.pending.get(url)||new Set();set.add(finish);this.pending.set(url,set);
       timer=setTimeout(abort,this.timeoutMs);timer.unref?.();signal?.addEventListener('abort',abort,{once:true});
+      if(this.recover && !this.recovering.has(url)){
+        const recovery=Promise.resolve().then(()=>this.recover(url)).then(()=>{if(this.resources.has(url))this.available(url);}).catch(()=>{}).finally(()=>this.recovering.delete(url));
+        this.recovering.set(url,recovery);
+      }
     });
   }
   available(url){for(const finish of [...(this.pending.get(url)||[])])finish(this.resources.get(url));}

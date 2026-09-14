@@ -17,20 +17,68 @@ if [ -z "$chrome_path" ] && [ -f "$HOME/.config/dev-tools/browser.json" ]; then
   chrome_path=$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/".config/dev-tools/browser.json").read_text()).get("chromium", ""))')
 fi
 if [ -z "$chrome_path" ]; then chrome_path=$(command -v google-chrome || command -v chromium); fi
+browser_engine=${SHARED_BROWSER_ENGINE:-native}
+case "$browser_engine" in
+  native)
+    xvfb_path=$(command -v Xvfb) || { echo 'Native Chrome requires Xvfb (Ubuntu: sudo apt-get install xvfb).' >&2; exit 1; }
+    flock_path=$(command -v flock) || { echo 'Native Chrome requires flock from util-linux.' >&2; exit 1; }
+    browser_dependency='Wants=dev-tools-shared-chrome.service
+After=dev-tools-shared-chrome.service'
+    ;;
+  headless) browser_dependency='' ;;
+  *) echo 'SHARED_BROWSER_ENGINE must be native or headless' >&2; exit 1 ;;
+esac
 npm ci
 npm run build
 mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/dev-tools/shared-browser"
 chmod 700 "$HOME/.local/state/dev-tools/shared-browser"
+browser_restore=false
+if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
+  if [ "$browser_engine" = headless ] || ! systemctl --user is-active --quiet dev-tools-shared-chrome.service; then
+    "$node_path" "$runtime_dir/migrate-engine.mjs" save
+    browser_restore=true
+  fi
+  # Stop an owned headless browser before starting the native host on its
+  # profile. A native receiver update only disconnects; Chrome stays running.
+  systemctl --user stop dev-tools-shared-browser.service
+fi
+if [ "$browser_engine" = headless ]; then
+  systemctl --user disable --now dev-tools-shared-chrome.service 2>/dev/null || true
+fi
+if [ "$browser_engine" = native ]; then
+cat > "$HOME/.config/systemd/user/dev-tools-shared-chrome.service" <<EOF
+[Unit]
+Description=Persistent native Chrome for the shared browser
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$runtime_dir
+ExecStart=$flock_path --no-fork $HOME/.local/state/dev-tools/shared-browser/browser-host.lock $node_path $runtime_dir/browser-host.mjs
+Environment=SHARED_BROWSER_CHROME=$chrome_path
+Environment=SHARED_BROWSER_XVFB=$xvfb_path
+UMask=0077
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+fi
 cat > "$HOME/.config/systemd/user/dev-tools-shared-browser.service" <<EOF
 [Unit]
 Description=Persistent DOM shared Chrome pilot
 After=network.target
+$browser_dependency
 
 [Service]
 Type=simple
 WorkingDirectory=$runtime_dir
 ExecStart=$node_path $runtime_dir/server.mjs
 Environment=SHARED_BROWSER_CHROME=$chrome_path
+Environment=SHARED_BROWSER_ENGINE=$browser_engine
 Environment=SHARED_BROWSER_ORIGIN=$browser_origin
 Environment=SHARED_BROWSER_OWNER=$browser_owner
 UMask=0077
@@ -43,7 +91,13 @@ RestartSec=3
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
+if [ "$browser_engine" = native ]; then
+  systemctl --user enable --now dev-tools-shared-chrome.service
+fi
 systemctl --user enable --now dev-tools-shared-browser.service
+if [ "$browser_restore" = true ]; then
+  "$node_path" "$runtime_dir/migrate-engine.mjs" restore
+fi
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/dev-tools-shared-browser" <<EOF
 #!/bin/sh

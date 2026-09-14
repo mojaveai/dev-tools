@@ -23,7 +23,7 @@ forwarding. See [the portal adapter](shared-browser-dev-portal.md).
 ## Install or update
 
 Prerequisites: Linux user systemd, Python 3.11+, Node 22+, npm, sandbox-capable
-Chromium, Tailscale. The legacy `--with-browser` provisioner can install Chromium
+Chromium, Tailscale, Xvfb and flock (Ubuntu packages `xvfb` and `util-linux`). The legacy `--with-browser` provisioner can install Chromium
 and its dependencies; the shared runtime does not use its VNC server.
 
 From a persistent dev-tools checkout:
@@ -41,10 +41,15 @@ bin/dev-tools shared-browser status
 The installer infers the HTTPS hostname from this machine's Tailscale DNS name,
 installs dependencies/builds assets, enables the persistent service, configures
 both agent CLIs, and disables the old native-registration repair service. It
-preserves unrelated agent settings. It starts a stopped runtime but does not
-restart an active browser during updates; restart deliberately when server code
-changes (`systemctl --user restart dev-tools-shared-browser`). Viewer assets
-require a page refresh. Restarting closes tabs; persisted site cookies may survive.
+preserves unrelated agent settings. The default `native` engine runs normal
+Chrome on an authenticated local Xvfb display, with no VNC or pixel stream.
+`dev-tools-shared-chrome.service` owns Chrome separately from the DOM receiver.
+Updates restart the receiver while preserving Chrome, open tabs, and unsaved
+page state. Viewer asset changes require a refresh. The first migration from
+the old owned headless engine restarts Chrome and reopens saved tab addresses;
+cookies/profile data stay in place, but unsaved forms cannot survive that initial
+Chrome restart. `SHARED_BROWSER_ENGINE=headless` retains the old launch mode for
+diagnostics. Reinstalling in that mode also restarts Chrome.
 
 Do not replace an occupied 8443 listener. Do not reset Serve configuration or
 broaden ACLs. Tailscale policy must allow the intended user to reach that port.
@@ -64,14 +69,14 @@ Demobox uses checksum-verified official Node 24.1.0 under
 dev-tools shared-browser status
 dev-tools shared-browser url
 dev-tools shared-browser start
-systemctl --user status dev-tools-shared-browser
+systemctl --user status dev-tools-shared-browser dev-tools-shared-chrome
 journalctl --user -u dev-tools-shared-browser -n 40
 ```
 
 If dev-tools is not on the shell PATH, use `~/.local/bin/dev-tools`.
 `dev-tools shared-browser mcp` starts the stdio server; normally the agent client
 launches it automatically from its registered MCP configuration. No Mac or local
-viewer must stay connected. The headless browser host must remain running.
+viewer must stay connected. The remote Chrome host must remain running.
 
 ## Deployment verification (2026-09-14)
 
@@ -182,3 +187,29 @@ dialogs remain accessible. Desktop and 390px phone tests verify opening/closing
 controls causes no page-area loss, alongside existing navigation, spinner, border
 and sizing checks. Desktop/mobile designs were visually inspected. Refresh the
 viewer to activate; no browser or Codex restart is required.
+
+## CAPTCHA investigation and native launch
+
+The controlled comparisons and limitations are recorded in
+[captcha-investigation.md](captcha-investigation.md). The engine change does
+not spoof browser properties or fabricate pointer movement. A normal remote
+profile can still receive image challenges when an established local profile
+passes with one checkbox click. There is no guarantee of equal provider decisions
+across devices, profiles, networks, or sites.
+
+Native-style coordinate input is available as `await tab.click([x, y])`, in
+source viewport CSS pixels. It works across iframe boundaries and emits the
+same visual click feedback as other agent actions. Existing node/selector clicks
+remain supported.
+
+The final native-engine checks passed on procbox and demobox, including receiver
+restarts preserving unsaved parent/child fields and recovering external styles
+and CSS background images without reloading the source page. Demobox also passed
+a full installer rerun with Chrome PID and unsaved edits preserved. The current
+unit suite has 33 checks; iframe and navigation live suites passed 12 and eight.
+Run those last two suites sequentially because they share a fixture port.
+
+Use the shared MCP for semantic agent actions in source Chrome. A separate
+extension operating the viewer must use actual pointer input; semantic clicks
+directly into the visual replay can bypass forwarding. Full screen-reader and
+semantic activation parity in the viewer has not been established.

@@ -1,0 +1,646 @@
+{
+  "routes": {
+    "cdp": {
+      "attempts": 30,
+      "passed_within_three": 24,
+      "cumulative_passes_at_round_0_1_2_3": [
+        0,
+        16,
+        24,
+        24
+      ],
+      "expirations": 1,
+      "try_again_responses": 7,
+      "median_tile_selections": 7.5,
+      "median_elapsed_seconds": 39.5
+    },
+    "shared": {
+      "attempts": 30,
+      "passed_within_three": 23,
+      "cumulative_passes_at_round_0_1_2_3": [
+        0,
+        15,
+        22,
+        23
+      ],
+      "expirations": 3,
+      "try_again_responses": 13,
+      "median_tile_selections": 5.5,
+      "median_elapsed_seconds": 35.65
+    }
+  },
+  "ordered_trials": [
+    {
+      "id": "V01",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 20.6
+    },
+    {
+      "id": "V02",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 20.7
+    },
+    {
+      "id": "V03",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 13.0
+    },
+    {
+      "id": "V04",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 14.3
+    },
+    {
+      "id": "V05",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 40.0
+    },
+    {
+      "id": "V06",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 19.1
+    },
+    {
+      "id": "V07",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 10,
+      "elapsed_seconds": 71.8
+    },
+    {
+      "id": "V08",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 16.6
+    },
+    {
+      "id": "V09",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 9,
+      "elapsed_seconds": 16.7
+    },
+    {
+      "id": "V10",
+      "route": "shared",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 2,
+      "tile_selections": 15,
+      "elapsed_seconds": 69.3
+    },
+    {
+      "id": "V11",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 28.8
+    },
+    {
+      "id": "V12",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 11,
+      "elapsed_seconds": 28.0
+    },
+    {
+      "id": "V13",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 8,
+      "elapsed_seconds": 20.1
+    },
+    {
+      "id": "V14",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 35.6
+    },
+    {
+      "id": "V15",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 6,
+      "elapsed_seconds": 14.9
+    },
+    {
+      "id": "V16",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 9,
+      "elapsed_seconds": 23.1
+    },
+    {
+      "id": "V17",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 6,
+      "elapsed_seconds": 47.5
+    },
+    {
+      "id": "V18",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 11.4
+    },
+    {
+      "id": "V19",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 2,
+      "elapsed_seconds": 10.2
+    },
+    {
+      "id": "V20",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 11,
+      "elapsed_seconds": 132.0
+    },
+    {
+      "id": "V21",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 10.1
+    },
+    {
+      "id": "V22",
+      "route": "shared",
+      "passed": true,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 13,
+      "elapsed_seconds": 35.6
+    },
+    {
+      "id": "V23",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 13.0
+    },
+    {
+      "id": "V24",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 12.9
+    },
+    {
+      "id": "V25",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 16.5
+    },
+    {
+      "id": "V26",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 3,
+      "elapsed_seconds": 10.6
+    },
+    {
+      "id": "V27",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 14.0
+    },
+    {
+      "id": "V28",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 11.6
+    },
+    {
+      "id": "V29",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 59.2
+    },
+    {
+      "id": "V30",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 9,
+      "elapsed_seconds": 35.7
+    },
+    {
+      "id": "V31",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 18.6
+    },
+    {
+      "id": "V32",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 6,
+      "elapsed_seconds": 44.0
+    },
+    {
+      "id": "V33",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 6,
+      "elapsed_seconds": 36.8
+    },
+    {
+      "id": "V34",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 39.0
+    },
+    {
+      "id": "V35",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 13.2
+    },
+    {
+      "id": "V36",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 12,
+      "elapsed_seconds": 39.0
+    },
+    {
+      "id": "V37",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 4,
+      "elapsed_seconds": 34.4
+    },
+    {
+      "id": "V38",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 8,
+      "elapsed_seconds": 97.9
+    },
+    {
+      "id": "V39",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 6,
+      "elapsed_seconds": 31.9
+    },
+    {
+      "id": "V40",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 10,
+      "elapsed_seconds": 63.8
+    },
+    {
+      "id": "V41",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 12,
+      "elapsed_seconds": 116.6
+    },
+    {
+      "id": "V42",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 8,
+      "elapsed_seconds": 140.6
+    },
+    {
+      "id": "V43",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 47.5
+    },
+    {
+      "id": "V44",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 8,
+      "elapsed_seconds": 35.9
+    },
+    {
+      "id": "V45",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 96.0
+    },
+    {
+      "id": "V46",
+      "route": "shared",
+      "passed": true,
+      "rounds": 1,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 5,
+      "elapsed_seconds": 107.2
+    },
+    {
+      "id": "V47",
+      "route": "shared",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 18,
+      "elapsed_seconds": 95.3
+    },
+    {
+      "id": "V48",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 11,
+      "elapsed_seconds": 170.4
+    },
+    {
+      "id": "V49",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 15,
+      "elapsed_seconds": 57.2
+    },
+    {
+      "id": "V50",
+      "route": "shared",
+      "passed": false,
+      "rounds": 2,
+      "expired": true,
+      "try_again_responses": 1,
+      "tile_selections": 12,
+      "elapsed_seconds": 247.8
+    },
+    {
+      "id": "V51",
+      "route": "shared",
+      "passed": false,
+      "rounds": 2,
+      "expired": true,
+      "try_again_responses": 1,
+      "tile_selections": 12,
+      "elapsed_seconds": 264.8
+    },
+    {
+      "id": "V52",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 21,
+      "elapsed_seconds": 131.4
+    },
+    {
+      "id": "V53",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 11,
+      "elapsed_seconds": 77.5
+    },
+    {
+      "id": "V54",
+      "route": "shared",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 9,
+      "elapsed_seconds": 138.8
+    },
+    {
+      "id": "V55",
+      "route": "shared",
+      "passed": false,
+      "rounds": 0,
+      "expired": true,
+      "try_again_responses": 0,
+      "tile_selections": 8,
+      "elapsed_seconds": 159.4
+    },
+    {
+      "id": "V56",
+      "route": "cdp",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 8,
+      "elapsed_seconds": 146.5
+    },
+    {
+      "id": "V57",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 1,
+      "expired": true,
+      "try_again_responses": 0,
+      "tile_selections": 7,
+      "elapsed_seconds": 146.7
+    },
+    {
+      "id": "V58",
+      "route": "shared",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 2,
+      "tile_selections": 15,
+      "elapsed_seconds": 208.1
+    },
+    {
+      "id": "V59",
+      "route": "shared",
+      "passed": true,
+      "rounds": 2,
+      "expired": false,
+      "try_again_responses": 1,
+      "tile_selections": 8,
+      "elapsed_seconds": 152.0
+    },
+    {
+      "id": "V60",
+      "route": "cdp",
+      "passed": false,
+      "rounds": 3,
+      "expired": false,
+      "try_again_responses": 0,
+      "tile_selections": 14,
+      "elapsed_seconds": 81.9
+    }
+  ],
+  "comparison": {
+    "shared_minus_direct": -0.033333333333333326,
+    "newcombe_90_interval": [
+      -0.20611174669756666,
+      0.14167081364573772
+    ],
+    "predeclared_noninferiority_margin": -0.1,
+    "lower_bound_above_margin": false,
+    "limitation": "Descriptive independent-binomial interval; repeated trials on one browser/network are dependent and visibly nonstationary. This does not establish distributional equivalence."
+  },
+  "settled_observations": 268,
+  "settled_mismatches": []
+}
