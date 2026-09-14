@@ -273,6 +273,45 @@ selection state matched, and the exact source checkbox returned
 one DOM-forwarded completion; the normal headless session and user devices
 still need retesting. Do not mark universal CAPTCHA handoff accepted.
 
+### Mouse fidelity and repeated-challenge investigation
+
+The viewer now forwards observed mouse movement and separate left-button
+press/release events over the page interaction layer, including cross-origin
+frames. Native form copies retain their existing editing/click path, and touch
+retains tap/scroll handling. A server capability handshake keeps older receivers
+compatible. Hover updates are frame-coalesced and acknowledgement-limited so a
+slow receiver gets the latest pending position; press/release flush pending
+movement in order. No synthetic movement paths or human-like timing are added.
+Cancellation/disconnect releases outside the page to avoid activating the control
+that was pressed. All mouse operations use the shared session action queue.
+
+Regression coverage checks hover before click, movement with a held button,
+separate press/release duration, exactly one click, touch fallback, reconnect
+without accidental activation, stale-document cleanup and bounded hover backlog.
+The unit suite has 26 passing checks; iframe and navigation live suites passed.
+
+September 14 follow-up observations (not a statistical CAPTCHA study):
+
+- The existing headless session produced both a successful DOM-forwarded bus
+  challenge and a rejected crosswalk attempt before the mouse update.
+- The mouse update completed a car challenge through the separate visible
+  comparison browser, with the exact source checkbox `aria-checked=true`.
+- The normal profile still produced rejection after the update. Temporarily
+  running that same profile/binary/network on an Xvfb display did not eliminate
+  rejection either. The experiment was reverted to normal headless operation.
+- A direct-CDP crosswalk challenge in that same profile passed; another shared
+  attempt did not. Earlier direct attempts expired and are inconclusive.
+- Inspected prompts, selections and image URLs synchronized; decoded RGBA image
+  checksums also matched in an inspected 4-by-4 challenge. A live input trace
+  confirmed one down/up/click at the requested coordinates with a ~120ms press.
+
+Image classification errors and provider risk decisions remain possible. These
+results verify input improvements, **not** a fix for repeated CAPTCHA rejection.
+Do not infer that every rejected answer was correct or that forwarding alone
+caused rejection. `SHARED_BROWSER_HEADLESS=false` is available for controlled
+diagnostics with a separately configured authenticated local display; it is not
+the default or a claimed CAPTCHA remedy.
+
 Temporary comparison services are `dev-tools-shared-browser-headed-test`
 (port 8792 / private HTTPS 8444) and `dev-tools-captcha-desktop-proxy`
 (port 8793 / private HTTPS 8445). The desktop proxy requires the owner's

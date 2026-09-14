@@ -15,6 +15,7 @@ import puppeteer from "puppeteer-core";
 import { WebSocketServer } from "ws";
 import { ActionFeedback } from "./feedback.mjs";
 import { AgentRuntime } from "./runtime.mjs";
+import { RemoteMouse } from "./remote-mouse.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const stateDir =
@@ -40,7 +41,7 @@ const browser = externalBrowserURL
   ? await puppeteer.connect({browserURL:externalBrowserURL,defaultViewport:null})
   : await puppeteer.launch({
   executablePath,
-  headless: true,
+  headless: process.env.SHARED_BROWSER_HEADLESS !== 'false',
   userDataDir: path.join(stateDir, "profile"),
   defaultViewport: { width: 1280, height: 800 },
   args: [
@@ -55,6 +56,7 @@ const downloads = new Downloads(path.join(transferDir, 'downloads'), () => {
   session.update().catch(() => {});
 });
 const sockets = new Set();
+const remoteMouse=new RemoteMouse();
 let activeUploads = 0;
 let queue = Promise.resolve();
 let running = true;
@@ -515,7 +517,7 @@ httpServer.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req) => {
   ws.clientId = randomUUID();
   sockets.add(ws);
-  send(ws, { type: "hello", clientId: ws.clientId });
+  send(ws, { type: "hello", clientId: ws.clientId, mouseInput:1 });
   // A reconnect starts with current DOM and form properties, not a timed
   // playback of old incremental events that can leave initial fields empty.
   serial(async () => {
@@ -534,6 +536,7 @@ wss.on("connection", (ws, req) => {
   }).catch(err => send(ws, {type:"error",message:err.message}));
   ws.on("close", () => {
     sockets.delete(ws);
+    serial(()=>remoteMouse.release(ws)).catch(()=>{});
     session.update().catch(() => {});
   });
   ws.on("message", async (raw) => {
@@ -581,8 +584,12 @@ wss.on("connection", (ws, req) => {
           await session.handleDialog(t, message);
           return;
         }
-        if (message.generation !== t.generation)
+        if (message.type==='pointer' && message.phase==='cancel') {await remoteMouse.release(ws);return;}
+        if (message.generation !== t.generation) {
+          await remoteMouse.release(ws);
           throw Error("Page changed; wait for the updated view");
+        }
+        if (message.type==='pointer') {await remoteMouse.dispatch(ws,t,message);return;}
         if (message.type === 'cancelChooser') {
           if (t.chooser?.public.id === message.chooser) {
             t.chooser = null;

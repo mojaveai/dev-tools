@@ -1,6 +1,7 @@
 import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
 import { controlOcclusion } from "./control-occlusion.js";
+import { relayMouse } from "./viewer-mouse.js";
 import { controlVisibility } from "./control-visibility.js";
 import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
@@ -19,6 +20,7 @@ let ws,
   scale = 1,
   connected = false;
 const shell = new ViewerShell();
+let mouseRelay,mouseSupported=false;
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const passkeys = new ViewerPasskeys();
 const caches = new Map();
@@ -88,14 +90,16 @@ function send(message) {
     error("Disconnected. Reconnecting without replaying input…");
     return;
   }
+  const requestId=crypto.randomUUID();
   ws.send(
     JSON.stringify({
       tab: active,
       generation,
       ...message,
-      requestId: crypto.randomUUID(),
+      requestId,
     }),
   );
+  return requestId;
 }
 function own() {
   return connected;
@@ -138,8 +142,12 @@ function wireFrame() {
     overlay.id = "interaction-layer";
     overlay.style.cssText = "position:absolute;inset:0;transform-origin:top left;z-index:2";
     $("viewport").append(overlay);
+    mouseRelay=relayMouse(overlay,{enabled:()=>connected && mouseSupported,
+      context:()=>({tab:active,generation}),
+      point:e=>{const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/scale,y:(e.clientY-r.top)/scale};},send});
     overlay.addEventListener("click", (e) => {
       if (e.target !== overlay) return;
+      if(mouseRelay.consumesClick(e))return;
       const r = overlay.getBoundingClientRect();
       const x = (e.clientX-r.left)/scale, y = (e.clientY-r.top)/scale;
       // A replay iframe can ignore pointer hit-testing. elementFromPoint then
@@ -278,6 +286,7 @@ function wireFrame() {
   reveal();
 }
 function showTab(id) {
+  mouseRelay?.dispose();mouseRelay=null;
   const changed=active!==id;
   agentPointer.reset();
   cancelAnimationFrame(momentumFrame);scrollSync.clear();
@@ -415,6 +424,7 @@ function connect() {
   ws.onmessage = (e) => {
     try {
       const m = JSON.parse(e.data);
+      if(m.type==='ack' || m.type==='error')mouseRelay?.acknowledge(m.requestId);
       if(m.type==="agentActivity" && m.tab===active && m.generation===generation) {
         agentPointer.handle(m,node=>{
           const element=replayer?.getMirror().getNode(node);
@@ -429,7 +439,7 @@ function connect() {
         const target=node?.nodeType===9 ? node.defaultView : node;
         target?.scrollTo({left:m.x,top:m.y,behavior:"instant"});scheduleLayout();
       }
-      if (m.type === "hello") clientId = m.clientId;
+      if (m.type === "hello") {clientId = m.clientId;mouseSupported=m.mouseInput===1;}
       if (m.type === "state") update(m);
       if (m.type === "event") eventReceived(m);
       // Keep the last rendered document until replacement events arrive.
@@ -449,6 +459,7 @@ function connect() {
     }
   };
   ws.onclose = () => {
+    mouseSupported=false;
     connected = false;shell.update({connected,message:state?.message});agentPointer.reset();transfers.disconnect();
     clearTimeout(fillTimer);fillTimer=null;pendingFills.clear();
     clearTimeout(scrollTimer);scrollTimer=null;pendingScroll=null;

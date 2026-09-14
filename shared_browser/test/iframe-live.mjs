@@ -28,6 +28,7 @@ try {
  await rpc('js',{context:'navigation-test',code:"const browser=await cua.getBrowser();const tab=await browser.tabs.new('http://127.0.0.1:8802/');nodeRepl.write('ready');"});
  browser=await puppeteer.launch({executablePath:process.env.SHARED_BROWSER_CHROME,headless:true,args:['--disable-dev-shm-usage']});
  const page=await browser.newPage();page.on('console',m=>console.log('VIEWER',m.type(),m.text().slice(0,300)));page.on('pageerror',e=>console.log(e.message));await page.setExtraHTTPHeaders({'Tailscale-User-Login':'manbir@asgroup.ai'});
+ await page.setViewport({width:800,height:600,hasTouch:true});
  await page.goto(origin);
 
  const frameData=()=>page.$eval('#replay iframe',e=>{const f=e.contentDocument?.querySelector('iframe'),d=f?.contentDocument;return {text:d?.body?.textContent,images:d?[...d.images].map(i=>({width:i.naturalWidth,src:i.src})):[]};});
@@ -55,9 +56,21 @@ try {
  // pointer input there. Human coordinates must survive that discrepancy.
  await page.$eval('#replay iframe',e=>{e.contentDocument.querySelector('iframe').style.pointerEvents='none';});
  const point=await page.$eval('#replay iframe',e=>{const f=e.contentDocument.querySelector('iframe'),r=f.getBoundingClientRect(),button=f.contentDocument.querySelector('button').getBoundingClientRect();return {x:r.x+f.clientLeft+button.x+10,y:r.y+f.clientTop+button.y+10};});
- await page.mouse.click(point.x,point.y);
+ await sourceFrame.evaluate(()=>{window.mouseEvents=[];for(const type of ['mousemove','mousedown','mouseup','click'])document.addEventListener(type,e=>window.mouseEvents.push({type,x:e.clientX,y:e.clientY,buttons:e.buttons,time:e.timeStamp}));});
+ await page.mouse.move(point.x,point.y);
+ await wait(()=>sourceFrame.evaluate(()=>window.mouseEvents.some(e=>e.type==='mousemove')),'hover forwarded before clicking');
+ await page.mouse.down();
+ await wait(()=>sourceFrame.evaluate(()=>window.mouseEvents.some(e=>e.type==='mousedown') && !window.mouseEvents.some(e=>e.type==='mouseup')),'press forwarded before release');
+ await new Promise(r=>setTimeout(r,150));
+ await page.mouse.move(point.x+3,point.y+3);
+ await page.mouse.up();
  await wait(async()=>(await frameData()).text.includes('Child clicked'),'human coordinate click inside frame').catch(async e=>{console.log({point,source:await sourceFrame.evaluate(`(${auditDOM.toString()})(document)`),viewer:await page.evaluate(`(${auditDOM.toString()})(document.querySelector('#replay iframe').contentDocument.querySelector('iframe').contentDocument)`),error:await page.$eval('#error',e=>e.textContent)});throw e;});
  console.log('PASS: human clicks land on intended child element');
+ const mouseEvents=await sourceFrame.evaluate(()=>window.mouseEvents);
+ assert.equal(mouseEvents.filter(e=>e.type==='click').length,1,'Native click must not be duplicated by legacy click forwarding');
+ assert.ok(mouseEvents.some(e=>e.type==='mousemove' && e.buttons===1),'Movement preserves held button');
+ assert.ok(mouseEvents.find(e=>e.type==='mouseup').time-mouseEvents.find(e=>e.type==='mousedown').time>=100,'Press duration is preserved');
+ console.log('PASS: iframe receives hover, held movement and separate press/release, with one click');
  await wait(async()=>(await frameData()).images.some(i=>i.width>0 && i.src.includes('changed')),'dynamic replacement image');
  console.log('PASS: replacement image loads after human action');
  const sourceAudit=await sourceFrame.evaluate(`(${auditDOM.toString()})(document)`);
@@ -66,6 +79,19 @@ try {
  console.log('PASS: source and shared frame controls/images match geometry, styles, visibility and decoded dimensions');
  assert.equal(await page.$eval('#replay iframe',e=>e.contentDocument.compatMode),await sourcePage.evaluate(()=>document.compatMode));
  console.log('PASS: source document layout mode is preserved');
+ await page.touchscreen.tap(point.x,point.y);
+ await wait(()=>sourceFrame.evaluate(()=>window.mouseEvents.filter(e=>e.type==='click').length===2),'touch fallback makes one click');
+ console.log('PASS: touch taps remain a single click');
+ await page.mouse.move(point.x,point.y);await page.mouse.down();
+ await wait(()=>sourceFrame.evaluate(()=>window.mouseEvents.filter(e=>e.type==='mousedown').length===3),'press before disconnect');
+ await page.reload();
+ await wait(async()=>(await frameData()).images.some(i=>i.width>0),'viewer reconnect');
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('#viewport')).visibility==='visible');
+ await page.mouse.up();
+ await page.mouse.move(point.x+5,point.y+5);
+ await wait(()=>sourceFrame.evaluate(()=>window.mouseEvents.at(-1)?.type==='mousemove' && window.mouseEvents.at(-1).buttons===0),'reconnected pointer has no held button').catch(async e=>{console.log({events:await sourceFrame.evaluate(()=>window.mouseEvents),point,viewer:await page.evaluate(({x,y})=>({target:document.elementFromPoint(x+5,y+5)?.outerHTML,error:document.querySelector('#error').textContent,visible:getComputedStyle(document.querySelector('#viewport')).visibility}),point)});throw e;});
+ assert.equal(await sourceFrame.evaluate(()=>window.mouseEvents.filter(e=>e.type==='click').length),2,'Disconnect must not activate the pressed control');
+ console.log('PASS: reconnect releases held mouse without an accidental click');
  await sourcePage.evaluate(()=>document.querySelector('#child').remove());
  await wait(()=>page.$('input[aria-label="Background field"]'),'background input restored after closing frame');
  await page.type('input[aria-label="Background field"]',' edited');
