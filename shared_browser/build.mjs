@@ -26,3 +26,5 @@ for (const name of ["viewer.js", "viewer.css"]) {
 }
 await writeFile("dist/viewer.html", html);
 await copyFile("fixture.html", "dist/fixture.html");
+await build({entryPoints:['passkey-phone.js'],bundle:true,minify:true,format:'iife',outfile:'dist/passkey-phone.js'});
+for (const name of ['passkey-phone.html','passkey-site.html','passkey-site.js']) await copyFile(name, 'dist/'+name);

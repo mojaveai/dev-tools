@@ -11,6 +11,8 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@rrweb/record": "2.1.4",
     "@rrweb/replay": "2.1.4",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.2",
     "acorn": "8.18.0",
     "esbuild": "0.28.2",
     "puppeteer-core": "25.10.0",

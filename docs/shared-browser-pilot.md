@@ -226,3 +226,24 @@ running fixture was verified to contain all three new file inputs.
 Physical iPhone picker, Photos/Files-provider behavior, and download saving remain
 for user acceptance. The next user step is refreshing the viewer and choosing a
 small test file in the File transfers section. WebAuthn remains unimplemented.
+
+## Passkey approval fixture ready (2026-09-14)
+
+Added the separate fixture described in shared-browser-passkey-fixture.md. It
+implements a real, verified phone passkey approval for the remote synthetic site's
+login session. It is an explicitly cooperating relying party, not transparent
+WebAuthn forwarding or a software credential bridge to existing sites.
+
+All 13 unit checks and 10 live passkey integration checks pass. QA uses a separate
+port/state directory and virtual authenticator; none was enrolled in the human
+fixture. Full approval-page UI verification initially stalled after backgrounding
+the test phone tab; bringing it to the foreground fixed the harness. Node 18 on
+/usr/bin/node was too old for SimpleWebAuthn; installation pins the existing
+/usr/local/bin/node runtime (24). The live service and /passkey Tailscale path are
+active. The shared browser service was not restarted and upload-test state remains.
+
+Remote test tab 82100b9a is signed out and waiting for phone setup. Actual Mac
+Chrome confirms the phone page displays Create demo passkey. Next: user enrolls
+from their iPhone at https://procbox.agent-trace.ts.net:8443/passkey/, reports ready,
+then the agent requests sign-in and the user approves a matching code with their
+passkey. The project report is server-protected until verified approval.

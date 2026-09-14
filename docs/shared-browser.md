@@ -114,7 +114,9 @@ Uploads/downloads are implemented and tested on desktop; physical iPhone accepta
 is next, followed by passkey-gated WebAuthn against a private fixture.
 Contenteditable/IME fidelity, arbitrary cross-origin-frame input, and pixel-free
 canvas/WebGL support are not yet accepted.
-WebAuthn interception and the credential service are not implemented in Stage 1.
+A separate cooperating-site passkey approval fixture is now available; see
+[the passkey fixture guide](shared-browser-passkey-fixture.md). Transparent WebAuthn
+interception and an approval-gated third-party credential service remain unimplemented.
 The inspected Agent Trace approval dashboard requires attested YubiKey Bio
 credentials, so a software credential must not be represented as compatible.
 
