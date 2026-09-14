@@ -267,3 +267,10 @@ Temporary comparison services are `dev-tools-shared-browser-headed-test`
 Tailscale identity for HTTP and validates the origin for WebSockets. It forwards
 to the `captcha-ab` desktop, whose browser/CDP listener remains loopback-only.
 The normal shared service at 8443 is separate.
+
+The desktop test is also available at `https://procbox.agent-trace.ts.net:8443/desktop/vnc.html`
+with the noVNC WebSocket path set to `desktop/websockify`. This reuses the
+existing allowed 8443 listener; no tailnet ACL changes were made. The proxy
+accepts WebSocket origins 8443 and 8445, with the same owner identity check.
+HTTP page/assets and the VNC WebSocket handshake were verified through the
+8443 tailnet URL from the Mac. Existing root and passkey routes are preserved.
