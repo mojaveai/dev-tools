@@ -229,3 +229,18 @@ A paired audit of Google's outer CAPTCHA page confirmed matching layout modes
 and measured positions after the fixes. Live challenge transitions and successful
 human completion remain acceptance checks; fixture success alone does not prove
 all vendor-specific challenge flows work.
+
+### Human click coordinate regression
+
+The paired live audit found a requested tap at (135, 282) arriving on a source
+parent DIV at (228, 309). Replay iframe hit-testing can return an ancestor when
+pointer events are disabled; resolving that ancestor to a node click moves the
+tap to its center. Interaction-layer taps now always retain page coordinates.
+The iframe fixture explicitly disables replay-frame hit-testing and verifies
+that the intended source button still receives the click. Native form overlays
+retain their existing node-based input handling.
+
+Opening a new viewer currently requests a fresh snapshot broadcast to existing
+viewers too. During paired audits, keep the diagnostic viewer connected across
+steps rather than repeatedly reopening it; this avoids introducing rebuilds
+that could be mistaken for an autonomous reconnect loop.

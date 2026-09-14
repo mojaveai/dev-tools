@@ -140,8 +140,10 @@ function wireFrame() {
       if (e.target !== overlay) return;
       const r = overlay.getBoundingClientRect();
       const x = (e.clientX-r.left)/scale, y = (e.clientY-r.top)/scale;
-      const target = replayer.iframe.contentDocument.elementFromPoint(x,y);
-      if (target) send({type:"click",...(target.tagName === "IFRAME" ? {} : {node:replayer.getMirror().getId(target)}),x,y});
+      // A replay iframe can ignore pointer hit-testing. elementFromPoint then
+      // returns an unrelated ancestor; clicking that node relocates the user's
+      // tap to its center. Preserve the actual point for all interaction-layer taps.
+      send({type:"click",x,y});
     });
     const point=e => {const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/scale,y:(e.clientY-r.top)/scale};};
     overlay.addEventListener("wheel", e => {

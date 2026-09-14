@@ -48,6 +48,9 @@ try {
    const measure=e=>{const r=e.getBoundingClientRect(),c=doc.defaultView.getComputedStyle(e);return {tag:e.tagName,x:r.x,y:r.y,width:r.width,height:r.height,display:c.display,visibility:c.visibility,opacity:c.opacity,font:c.font,border:c.border,backgroundColor:c.backgroundColor,hasBackground:c.backgroundImage!=='none',...(e.tagName==='IMG'?{loaded:e.complete&&e.naturalWidth>0,naturalWidth:e.naturalWidth,naturalHeight:e.naturalHeight}:{})};};
    return [...doc.querySelectorAll('button,img')].map(measure);
  };
+ // Replay hit-testing may ignore embedded frames even though Chrome accepts
+ // pointer input there. Human coordinates must survive that discrepancy.
+ await page.$eval('#replay iframe',e=>{e.contentDocument.querySelector('iframe').style.pointerEvents='none';});
  const point=await page.$eval('#replay iframe',e=>{const f=e.contentDocument.querySelector('iframe'),r=f.getBoundingClientRect(),button=f.contentDocument.querySelector('button').getBoundingClientRect();return {x:r.x+f.clientLeft+button.x+10,y:r.y+f.clientTop+button.y+10};});
  await page.mouse.click(point.x,point.y);
  await wait(async()=>(await frameData()).text.includes('Child clicked'),'human coordinate click inside frame').catch(async e=>{console.log({point,source:await sourceFrame.evaluate(`(${auditDOM.toString()})(document)`),viewer:await page.evaluate(`(${auditDOM.toString()})(document.querySelector('#replay iframe').contentDocument.querySelector('iframe').contentDocument)`),error:await page.$eval('#error',e=>e.textContent)});throw e;});
