@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {browserSettings} from './settings.mjs';
 
 export function loopbackEndpoint(value) {
   const u=new URL(value);
@@ -12,6 +13,7 @@ export function loopbackEndpoint(value) {
 // and does not update the legacy DevToolsActivePort file in its profile.
 export async function browserConnection({stateDir,endpoint}={}) {
   if(endpoint)return {browserWSEndpoint:loopbackEndpoint(endpoint)};
+  stateDir ||= (await browserSettings()).stateDir;
   try {
     const host=JSON.parse(await fs.readFile(path.join(stateDir,'browser-host.json'),'utf8'));
     return {browserWSEndpoint:loopbackEndpoint(host.browserWSEndpoint)};

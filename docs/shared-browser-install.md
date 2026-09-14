@@ -20,6 +20,23 @@ Each host has its own profile/session. Only procbox currently has the Agent Trac
 QA same-origin passkey adapter. Generic sites do not automatically gain passkey
 forwarding. See [the portal adapter](shared-browser-dev-portal.md).
 
+The selected Chrome profile can be pinned in
+`~/.config/dev-tools/shared-browser.json`, with absolute `stateDir` and `chrome`
+paths and a `hostService` systemd unit name. MCP, CLI, receiver, Chrome host,
+passkey helper, and installer all read this selection. Explicit
+`SHARED_BROWSER_STATE` / `SHARED_BROWSER_CHROME` / `SHARED_BROWSER_HOST_SERVICE`
+overrides remain available for isolated diagnostics. Change this configuration
+as part of a coordinated service migration, then run the installer; changing
+only the file does not switch already-running receiver/Chrome processes.
+
+Procbox's operational profile is
+`~/.local/state/dev-tools/shared-browser-primary`, using regular Google Chrome
+and `dev-tools-shared-chrome-primary.service`. It was promoted from the tested
+session; the standard MCP and port 8443 viewer now use that same session.
+The older profile remains at `~/.local/state/dev-tools/shared-browser/profile`;
+its Chrome host is retained but disabled for automatic startup. To inspect that
+older endpoint explicitly, set `SHARED_BROWSER_STATE` to its parent directory.
+
 ## Install or update
 
 Prerequisites: Linux user systemd, Python 3.11+, Node 22+, npm, sandbox-capable
@@ -43,7 +60,8 @@ installs dependencies/builds assets, enables the persistent service, configures
 both agent CLIs, and disables the old native-registration repair service. It
 preserves unrelated agent settings. The default `native` engine runs normal
 Chrome on an authenticated local Xvfb display, with no VNC or pixel stream.
-`dev-tools-shared-chrome.service` owns Chrome separately from the DOM receiver.
+The configured host service (normally `dev-tools-shared-chrome.service`) owns
+Chrome separately from the DOM receiver.
 Updates restart the receiver while preserving Chrome, open tabs, and unsaved
 page state. Viewer asset changes require a refresh. The first migration from
 the old owned headless engine restarts Chrome and reopens saved tab addresses;

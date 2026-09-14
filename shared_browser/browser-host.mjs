@@ -1,7 +1,6 @@
 // Own a normal desktop Chrome independently of the DOM receiver. Xvfb renders
 // locally; no desktop/video listener is started. Keep Chrome's normal properties.
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
@@ -9,6 +8,7 @@ import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import WebSocket from 'ws';
 import {loopbackEndpoint} from './browser-endpoint.mjs';
+import {browserSettings} from './settings.mjs';
 export {loopbackEndpoint} from './browser-endpoint.mjs';
 
 export function xauthority(cookie) {
@@ -49,8 +49,9 @@ async function closeChrome(endpoint) {
 }
 
 export async function runBrowserHost() {
-  const state=process.env.SHARED_BROWSER_STATE||path.join(os.homedir(),'.local/state/dev-tools/shared-browser');
-  const executable=process.env.SHARED_BROWSER_CHROME||'/usr/bin/google-chrome';
+  const settings=await browserSettings();
+  const state=settings.stateDir;
+  const executable=settings.chrome||'/usr/bin/google-chrome';
   await fs.mkdir(state,{recursive:true,mode:0o700});
   // OS advisory locking is supplied by the systemd unit's flock. The endpoint
   // file is published only after the owned Chrome process announces readiness.

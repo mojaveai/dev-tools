@@ -404,3 +404,12 @@ node test/iframe-live.mjs
 The live suites create isolated profiles and synthetic pages. They cover label
 geometry/mutations, local and source scrolling, mouse/touch form controls,
 typing, navigation highlights, iframe occlusion, images, and reconnects.
+
+The operational profile handoff check also exposed WebKit hit-testing at rounded
+input corners and transparent textarea resize corners. Those points can return
+only ancestors, which must not count as an occluder. The visibility check now
+requires a reachable sample and rejects actual overlapping elements, while
+allowing these empty corner samples. `test/control-occlusion-webkit.mjs` (with
+`SHARED_BROWSER_WEBKIT_MODULE` set) covers both cases and verifies that a real
+partial overlay still blocks the form overlay. The live tailnet check verifies
+MCP edits reaching the viewer, viewer typing reaching MCP, and reconnect.

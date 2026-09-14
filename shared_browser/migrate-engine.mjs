@@ -2,9 +2,9 @@
 // updates keep the existing Chrome process and do not need restoration.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import {rpc} from './rpc.mjs';
-const state=process.env.SHARED_BROWSER_STATE||path.join(os.homedir(),'.local/state/dev-tools/shared-browser');
+import {browserSettings} from './settings.mjs';
+const state=(await browserSettings()).stateDir;
 const file=path.join(state,'engine-migration-tabs.json');
 if(process.argv[2]==='save'){
   const s=await rpc('state');

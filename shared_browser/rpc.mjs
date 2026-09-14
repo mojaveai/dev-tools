@@ -1,12 +1,8 @@
 import http from "node:http";
 import path from "node:path";
-import os from "node:os";
-export function rpc(method, data = {}) {
-  const socketPath = path.join(
-    process.env.SHARED_BROWSER_STATE ||
-      path.join(os.homedir(), ".local/state/dev-tools/shared-browser"),
-    "server.sock",
-  );
+import {browserSettings} from './settings.mjs';
+export async function rpc(method, data = {}) {
+  const socketPath = path.join((await browserSettings()).stateDir,"server.sock");
   return new Promise((resolve, reject) => {
     const req = http.request(
       {

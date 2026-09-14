@@ -12,7 +12,10 @@ if [ -z "$browser_origin" ]; then
     browser_origin="https://$browser_dns:8443"
 fi
 browser_owner=${SHARED_BROWSER_OWNER:-manbir@asgroup.ai}
-chrome_path=${SHARED_BROWSER_CHROME:-}
+browser_state=$("$node_path" "$runtime_dir/settings.mjs" stateDir)
+browser_host_service=$("$node_path" "$runtime_dir/settings.mjs" hostService)
+chrome_path=$("$node_path" "$runtime_dir/settings.mjs" chrome)
+if [ -z "$chrome_path" ]; then chrome_path=$(command -v google-chrome || true); fi
 if [ -z "$chrome_path" ] && [ -f "$HOME/.config/dev-tools/browser.json" ]; then
   chrome_path=$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/".config/dev-tools/browser.json").read_text()).get("chromium", ""))')
 fi
@@ -22,19 +25,19 @@ case "$browser_engine" in
   native)
     xvfb_path=$(command -v Xvfb) || { echo 'Native Chrome requires Xvfb (Ubuntu: sudo apt-get install xvfb).' >&2; exit 1; }
     flock_path=$(command -v flock) || { echo 'Native Chrome requires flock from util-linux.' >&2; exit 1; }
-    browser_dependency='Wants=dev-tools-shared-chrome.service
-After=dev-tools-shared-chrome.service'
+    browser_dependency="Wants=$browser_host_service
+After=$browser_host_service"
     ;;
   headless) browser_dependency='' ;;
   *) echo 'SHARED_BROWSER_ENGINE must be native or headless' >&2; exit 1 ;;
 esac
 npm ci
 npm run build
-mkdir -p "$HOME/.config/systemd/user" "$HOME/.local/state/dev-tools/shared-browser"
-chmod 700 "$HOME/.local/state/dev-tools/shared-browser"
+mkdir -p "$HOME/.config/systemd/user" "$browser_state"
+chmod 700 "$browser_state"
 browser_restore=false
 if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
-  if [ "$browser_engine" = headless ] || ! systemctl --user is-active --quiet dev-tools-shared-chrome.service; then
+  if [ "$browser_engine" = headless ] || ! systemctl --user is-active --quiet "$browser_host_service"; then
     "$node_path" "$runtime_dir/migrate-engine.mjs" save
     browser_restore=true
   fi
@@ -43,10 +46,10 @@ if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
   systemctl --user stop dev-tools-shared-browser.service
 fi
 if [ "$browser_engine" = headless ]; then
-  systemctl --user disable --now dev-tools-shared-chrome.service 2>/dev/null || true
+  systemctl --user disable --now "$browser_host_service" 2>/dev/null || true
 fi
 if [ "$browser_engine" = native ]; then
-cat > "$HOME/.config/systemd/user/dev-tools-shared-chrome.service" <<EOF
+cat > "$HOME/.config/systemd/user/$browser_host_service" <<EOF
 [Unit]
 Description=Persistent native Chrome for the shared browser
 After=network.target
@@ -54,8 +57,9 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$runtime_dir
-ExecStart=$flock_path --no-fork $HOME/.local/state/dev-tools/shared-browser/browser-host.lock $node_path $runtime_dir/browser-host.mjs
-Environment=SHARED_BROWSER_CHROME=$chrome_path
+ExecStart=$flock_path --no-fork "$browser_state/browser-host.lock" $node_path $runtime_dir/browser-host.mjs
+Environment="SHARED_BROWSER_STATE=$browser_state"
+Environment="SHARED_BROWSER_CHROME=$chrome_path"
 Environment=SHARED_BROWSER_XVFB=$xvfb_path
 UMask=0077
 KillMode=mixed
@@ -77,7 +81,8 @@ $browser_dependency
 Type=simple
 WorkingDirectory=$runtime_dir
 ExecStart=$node_path $runtime_dir/server.mjs
-Environment=SHARED_BROWSER_CHROME=$chrome_path
+Environment="SHARED_BROWSER_STATE=$browser_state"
+Environment="SHARED_BROWSER_CHROME=$chrome_path"
 Environment=SHARED_BROWSER_ENGINE=$browser_engine
 Environment=SHARED_BROWSER_ORIGIN=$browser_origin
 Environment=SHARED_BROWSER_OWNER=$browser_owner
@@ -92,7 +97,7 @@ WantedBy=default.target
 EOF
 systemctl --user daemon-reload
 if [ "$browser_engine" = native ]; then
-  systemctl --user enable --now dev-tools-shared-chrome.service
+  systemctl --user enable --now "$browser_host_service"
 fi
 systemctl --user enable --now dev-tools-shared-browser.service
 if [ "$browser_restore" = true ]; then
@@ -107,7 +112,7 @@ if systemctl --user is-active --quiet dev-tools-portal-passkey.service; then
     exit 1
   fi
   if [ "$portal_runtime" != "$runtime_dir" ]; then
-    install -m 0644 browser-endpoint.mjs portal-passkey-bridge.mjs "$portal_runtime/"
+    install -m 0644 browser-endpoint.mjs settings.mjs portal-passkey-bridge.mjs "$portal_runtime/"
   fi
   systemctl --user restart dev-tools-portal-passkey.service
 fi

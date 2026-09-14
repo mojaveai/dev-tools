@@ -1,7 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
@@ -68,7 +67,6 @@ let browser;
 while(true){
  try{
    const connection=await browserConnection({
-     stateDir:process.env.SHARED_BROWSER_STATE||path.join(os.homedir(),'.local/state/dev-tools/shared-browser'),
      endpoint:process.env.PORTAL_BROWSER_WS,
    });
    browser=await puppeteer.connect({...connection,defaultViewport:null});

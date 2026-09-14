@@ -7,7 +7,6 @@ import { UploadStore, remoteFiles, validateSizes, MAX_BATCH_BYTES } from "./tran
 import { Downloads } from "./downloads.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -18,18 +17,18 @@ import { AgentRuntime } from "./runtime.mjs";
 import { RemoteMouse } from "./remote-mouse.mjs";
 import { loopbackEndpoint } from "./browser-host.mjs";
 import { resourceRecovery } from "./resource-recovery.mjs";
+import { browserSettings } from "./settings.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const stateDir =
-  process.env.SHARED_BROWSER_STATE ||
-  path.join(os.homedir(), ".local/state/dev-tools/shared-browser");
+const settings = await browserSettings();
+const stateDir = settings.stateDir;
 const port = Number(process.env.SHARED_BROWSER_PORT || 8791);
 const publicOrigin =
   process.env.SHARED_BROWSER_ORIGIN ||
   "https://procbox.agent-trace.ts.net:8443";
 const owner = process.env.SHARED_BROWSER_OWNER || "manbir@asgroup.ai";
 const executablePath =
-  process.env.SHARED_BROWSER_CHROME || "/usr/bin/google-chrome";
+  settings.chrome || "/usr/bin/google-chrome";
 await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 const recorder = await fs.readFile(path.join(root, "dist/recorder.js"), "utf8");
 // Diagnostic attachment keeps the desktop supervisor responsible for Chrome.

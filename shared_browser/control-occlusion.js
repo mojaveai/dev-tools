@@ -20,14 +20,18 @@ export function controlOcclusion(doc) {
       const {left,top,right,bottom}=bounds;
       const dx=Math.min(2,(right-left)/2),dy=Math.min(2,(bottom-top)/2);
       const points=[[(left+right)/2,(top+bottom)/2],[left+dx,top+dy],[right-dx,top+dy],[left+dx,bottom-dy],[right-dx,bottom-dy]];
-      return points.every(([x,y])=>{
+      let reached=false;
+      const unobscured=points.every(([x,y])=>{
         for(const node of doc.elementsFromPoint(x,y)){
-          if(node===source || source.contains(node))return true;
+          if(node===source || source.contains(node)){reached=true;return true;}
           if(node.contains(source) || invisible(node))continue;
           return false;
         }
-        return false;
+        // Rounded corners and WebKit's transparent textarea resize corner can
+        // hit only ancestors. That is empty space, not an occluding element.
+        return true;
       });
+      return unobscured && reached;
     },
     dispose(){style.remove();},
   };
