@@ -1,3 +1,4 @@
+import { ViewerTransfers } from "./viewer-transfers.js";
 import { AgentPointer } from "./agent-pointer.js";
 import { ScrollSync } from "./scroll-sync.mjs";
 import { Replayer } from "@rrweb/replay";
@@ -12,6 +13,7 @@ let ws,
   replayer,
   scale = 1,
   connected = false;
+const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const caches = new Map();
 const agentPointer=new AgentPointer(document.getElementById("viewport"));
 let retries = 0;
@@ -213,13 +215,14 @@ function wireFrame() {
   overlay.style.transform = `scale(${scale})`;
   const seen = new Set();
   for (const source of doc.querySelectorAll("input,textarea,select,button,a[href]")) {
-    if (["hidden","file"].includes(source.type)) continue;
+    if (source.type === "hidden") continue;
     const rect=source.getBoundingClientRect();
     if (!rect.width || !rect.height) continue;
     source.setAttribute("aria-hidden", "true");
     source.tabIndex=-1;
     const id=replayer.getMirror().getId(source);
     seen.add(id);
+    const fileInput=source.type === "file";
     const clickable=source.tagName==="BUTTON" || source.tagName==="A" ||
       ["checkbox","radio","submit","button"].includes(source.type);
     // Only the native parent control draws editable text. Drawing its replay
@@ -227,11 +230,12 @@ function wireFrame() {
     if (!clickable) source.style.opacity="0";
     let field=controls.get(id);
     if (!field) {
-      field=document.createElement(clickable ? "button" : source.tagName);
-      if (source.tagName==="INPUT" && !clickable) field.type=source.type;
+      field=document.createElement(clickable || fileInput ? "button" : source.tagName);
+      if (source.tagName==="INPUT" && !clickable && !fileInput) field.type=source.type;
       if (clickable) field.addEventListener("click", () => send({type:"click",node:id}));
+      if (fileInput) field.addEventListener('click', () => transfers.pick({node:id,multiple:source.multiple,accept:source.accept}));
       field.dataset.node=id;
-      field.addEventListener("input", () => queueFill(id,field.value));
+      field.addEventListener("input", () => {if (!fileInput) queueFill(id,field.value);});
       field.addEventListener("blur", flushFills);
       field.addEventListener("change", () => {
         if (field.tagName==="SELECT") send({type:"select",node:id,value:field.value});
@@ -275,7 +279,11 @@ function wireFrame() {
         option.textContent=o.textContent; option.disabled=o.disabled; return option;
       }));
     }
-    if (document.activeElement!==field) field.value=source.value;
+    if (fileInput) {
+      field.textContent = source.getAttribute('data-shared-file-names') || (source.multiple ? 'Choose files…' : 'Choose file…');
+      field.disabled ||= source.hasAttribute('webkitdirectory');
+      field.style.cursor = 'pointer';
+    } else if (document.activeElement!==field) field.value=source.value;
   }
   for (const [id,field] of controls) if (!seen.has(id)) {field.remove();controls.delete(id);}
   agentPointer.refresh();
@@ -322,7 +330,7 @@ function showTab(id) {
   replayer.on("event-cast", event => {
     if (event.type===3 && event.data.source===5) {
       const field=controls.get(event.data.id);
-      if (field && document.activeElement!==field && !pendingFills.has(event.data.id)) {
+      if (field && field.tagName!=="BUTTON" && document.activeElement!==field && !pendingFills.has(event.data.id)) {
         field.value=event.data.text;
       }
       return;
@@ -383,6 +391,7 @@ function update(next) {
   const selected = next.activeTab;
   if (selected !== active) showTab(selected);
   tabs.value = active || "";
+  transfers.update(next);
   if (document.activeElement !== $("url"))
     $("url").value = next.tabs.find((t) => t.id === active)?.url || "";
 }
@@ -436,7 +445,7 @@ function connect() {
     }
   };
   ws.onclose = () => {
-    connected = false;agentPointer.reset();
+    connected = false;agentPointer.reset();transfers.disconnect();
     clearTimeout(fillTimer);fillTimer=null;pendingFills.clear();
     clearTimeout(scrollTimer);scrollTimer=null;pendingScroll=null;
     cancelAnimationFrame(momentumFrame);scrollSync.clear();

@@ -87,9 +87,8 @@ navigation, form selection, and JavaScript dialogs are supported. Optional
 semantic locators are also available. Read the MCP's tool instructions for the
 complete supported surface; it is not the proprietary native runtime.
 
-Human takeover is enforced at the action gateway. It waits for an already-running
-action, then blocks new agent mutations. The agent must inspect state after
-handoff, a timeout, or reconnect; it must never blindly replay an uncertain action.
+Humans and agents share one ordered action queue without a takeover lock.
+Inspect state after a timeout or reconnect; never blindly replay an uncertain action.
 
 ## Tests and current acceptance gates
 
@@ -103,20 +102,66 @@ node test/live.mjs
 
 The live test uses the actual MCP SDK and stdio server, plus viewer WebSockets.
 It checks tool discovery, persistent bindings, form entry, DOM delivery, denied
-access, handoff exclusion, stale input rejection, and viewer/MCP reconnect/reset.
+access, shared mutation access, stale input rejection, and viewer/MCP reconnect/reset.
 It does not establish that a second physical device can reach the Tailscale URL.
 
 Visual QA can use `test/qa-proxy.mjs` with a temporary loopback-only SSH forward.
 That helper injects the owner identity solely for local testing. It must never be
 published or represented as the independent remote viewer deployment.
 
-Stages 2–4 remain gated on user acceptance: desktop/iPhone collaboration and
-measured bandwidth; uploads and edge cases; then passkey-gated WebAuthn against a
-private fixture. Uploads, downloads, contenteditable/IME fidelity, arbitrary
-cross-origin-frame input, and pixel-free canvas/WebGL support are not yet accepted.
+Core collaboration and the refined cursor demo have been accepted by the user.
+Uploads/downloads are implemented and tested on desktop; physical iPhone acceptance
+is next, followed by passkey-gated WebAuthn against a private fixture.
+Contenteditable/IME fidelity, arbitrary cross-origin-frame input, and pixel-free
+canvas/WebGL support are not yet accepted.
 WebAuthn interception and the credential service are not implemented in Stage 1.
 The inspected Agent Trace approval dashboard requires attested YubiKey Bio
 credentials, so a software credential must not be represented as compatible.
+
+## File transfers
+
+The viewer uses a local native file picker for visible remote file inputs. Selected
+bytes travel over an owner-authenticated, exact-origin HTTP request, independently
+of the DOM stream. The server binds attachment to the live viewer connection, tab,
+and document generation, stages files privately, then sets the real Chrome input.
+Interrupted requests are not retried. Cancellation before attachment keeps the
+existing selection. If a connection drops after attachment but before its response,
+the viewer reports uncertainty and asks the user to inspect the page.
+
+Custom upload buttons are intercepted in Chrome and display a Choose files / Cancel
+prompt in the viewer. The extra user tap preserves browser user-activation rules
+on iPhone. Closing this prompt discards it without clearing existing files. Native
+website cancel-event fidelity and directory pickers are not implemented.
+
+Agent examples (paths are on procbox):
+
+```js
+await tab.setFiles('#upload-single', '/absolute/path/to/test.txt');
+await tab.setFiles('#upload-multiple', ['/absolute/one.txt', '/absolute/two.txt']);
+await tab.chooseFiles('/absolute/path/to/test.txt'); // pending custom picker
+nodeRepl.write(await tab.getDownloads());
+```
+
+Uploads allow 10 files, 10 MB per file and 20 MB total. Viewer-staged files use
+random private directories, preserve duplicate basenames separately, and remain
+available to Chrome until the tab navigates/closes or the service stops. Retained
+uploads are limited to 128 MB per server process. Agent-supplied source files are
+never deleted. Graceful stop deletes the private transfer directory; after a crash,
+old private transfer directories can remain on disk and are not re-served.
+
+Chrome downloads continue without viewers. Completed downloads appear as
+owner-authenticated attachment links that the user explicitly saves to their own
+device. Agent download records additionally expose the private remote path.
+Website filenames are sanitized and never become storage paths. The pilot limits
+downloads to 20 MB each, 100 MB total and 20 tracked downloads per process.
+Downloads are available across viewer reconnects, not service restarts. Streaming
+resume, folder uploads, and large-file support are outside this pilot stage.
+
+`node test/transfers-live.mjs` checks identity/origin enforcement, connection and
+generation binding, file limits, wrong targets, exact hashes, duplicate names,
+repeat selection, agent uploads, custom picker cancellation, interrupted transfer,
+and downloads/reconnect. Use `TEST_PORT` and `SHARED_BROWSER_STATE` for a separate
+QA instance. `npm test` includes transfer size/path/storage checks.
 
 ## Rollback
 

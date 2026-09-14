@@ -1,4 +1,7 @@
 import http from "node:http";
+import { createReadStream } from "node:fs";
+import { UploadStore, remoteFiles, validateSizes, MAX_BATCH_BYTES } from "./transfers.mjs";
+import { Downloads } from "./downloads.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -34,7 +37,13 @@ const browser = await puppeteer.launch({
     "--no-default-browser-check",
   ],
 });
+const transferDir = await fs.mkdtemp(path.join(stateDir, 'transfers-'));
+const uploads = new UploadStore(path.join(transferDir, 'uploads'));
+const downloads = new Downloads(path.join(transferDir, 'downloads'), () => {
+  session.update().catch(() => {});
+});
 const sockets = new Set();
+let activeUploads = 0;
 let queue = Promise.resolve();
 let running = true;
 const serial = (fn) => {
@@ -91,6 +100,8 @@ const session = {
       activeTab: this.active,
       viewers: sockets.size,
       bytesSent: this.bytesSent,
+      downloads: downloads.list(),
+      choosers: [...this.tabs.values()].filter(t => t.chooser).map(t => ({tab:t.id, generation:t.generation, ...t.chooser.public})),
     };
   },
   async update() {
@@ -163,6 +174,31 @@ const session = {
         })),
     }));
   },
+  downloads(agent = false) { return downloads.list(agent); },
+  async setFiles(tab, element, paths) {
+    const files = await remoteFiles(paths);
+    const props = await element.evaluate(e => ({file:e.tagName === 'INPUT' && e.type === 'file', multiple:e.multiple, disabled:e.disabled, directory:e.webkitdirectory}));
+    if (!props.file || props.disabled || props.directory) throw Error('Choose an enabled file input; folders are not supported');
+    validateSizes(files, props.multiple);
+    const visible = await element.isVisible();
+    await this.feedback(tab, visible ? element : null, 'upload', async () => {
+      await element.uploadFile(...files.map(f => f.path));
+      await element.evaluate(e => e.setAttribute('data-shared-file-names', [...e.files].map(f=>f.name).join(', ')));
+    });
+    tab.chooser = null;
+    await this.update();
+    return files.map(({name, size}) => ({name,size}));
+  },
+  async chooseFiles(tab, paths) {
+    const chooser = tab.chooser;
+    if (!chooser || chooser.generation !== tab.generation) throw Error('File chooser is no longer open');
+    const files = await remoteFiles(paths);
+    validateSizes(files, chooser.public.multiple);
+    await tab.cdp.send('DOM.setFileInputFiles', {backendNodeId:chooser.backendNodeId, files:files.map(f=>f.path)});
+    tab.chooser = null;
+    await this.update();
+    return files.map(({name,size})=>({name,size}));
+  },
   async handleDialog(tab, { accept, text }) {
     if (!tab.dialog) throw Error("No pending dialog");
     const d = tab.dialog;
@@ -191,6 +227,15 @@ async function attachPage(page) {
     resourceBytes: 0,
   };
   session.tabs.set(tab.id, tab);
+  tab.cdp = await page.createCDPSession();
+  await tab.cdp.send('Page.enable');
+  await tab.cdp.send('Page.setInterceptFileChooserDialog', {enabled:true});
+  tab.cdp.on('Page.fileChooserOpened', event => {
+    if (!event.backendNodeId) return;
+    tab.chooser = {backendNodeId:event.backendNodeId, generation:tab.generation,
+      public:{id:randomUUID(), multiple:event.mode === 'selectMultiple'}};
+    session.update().catch(() => {});
+  });
   if (!session.active) session.active = tab.id;
   await page.exposeFunction("__sharedEmit", ({ generation, event }) => {
     // Cross-origin child recording is relayed by rrweb to the top-level recorder.
@@ -243,6 +288,8 @@ async function attachPage(page) {
   });
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) {
+      tab.chooser = null;
+      uploads.releaseTab(tab.id).catch(err => console.error(err.message));
       tab.generation = null;
       tab.events = [];
       tab.eventBytes = 0;
@@ -261,6 +308,7 @@ async function attachPage(page) {
     });
   });
   page.on("close", () => {
+    uploads.releaseTab(tab.id).catch(err => console.error(err.message));
     session.tabs.delete(tab.id);
     if (session.active === tab.id)
       session.active = session.tabs.keys().next().value || null;
@@ -282,6 +330,7 @@ browser.on("targetcreated", async (target) => {
   }
 });
 for (const page of await browser.pages()) await attach(page);
+await downloads.start(browser);
 const runtime = new AgentRuntime(session);
 async function body(req, max = 200000) {
   let size = 0,
@@ -314,8 +363,67 @@ const httpServer = http.createServer(async (req, res) => {
         },
         403,
       );
+    if (url.pathname === '/upload' && req.method === 'POST') {
+      if (req.headers.origin !== publicOrigin) return json(res, {error:'Invalid upload origin'}, 403);
+      if (activeUploads >= 3) return json(res, {error:'Another transfer is in progress'}, 429);
+      const client = [...sockets].find(ws => ws.clientId === url.searchParams.get('client'));
+      const tab = session.tabs.get(url.searchParams.get('tab'));
+      const generation = url.searchParams.get('generation');
+      const valid = () => client?.readyState === 1 && tab && session.tabs.get(tab.id) === tab && tab.generation === generation;
+      if (!valid()) return json(res, {error:'Page or connection changed; choose your files again'}, 409);
+      activeUploads++;
+      let staged;
+      try {
+        const parts = []; let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > MAX_BATCH_BYTES + 65536) throw Error('Choose at most 20 MB in total');
+          parts.push(chunk);
+        }
+        const data = await new Request('http://local/upload', {method:'POST',
+          headers:{'content-type':req.headers['content-type'] || ''}, body:Buffer.concat(parts)}).formData();
+        const files = data.getAll('files');
+        if (!files.length || files.some(f => typeof f.arrayBuffer !== 'function')) throw Error('Choose a file');
+        validateSizes(files);
+        staged = await uploads.stage(files, tab.id, generation);
+        const result = await serial(async () => {
+          if (!valid() || req.aborted) throw Error('Page or connection changed; upload was not attached');
+          await tab.page.bringToFront();
+          const chooserId = url.searchParams.get('chooser');
+          if (chooserId) {
+            if (tab.chooser?.public.id !== chooserId) throw Error('File chooser changed');
+            return session.chooseFiles(tab, staged.paths);
+          }
+          const node = Number(url.searchParams.get('node'));
+          if (!Number.isInteger(node) || node <= 0) throw Error('Invalid file input');
+          const handle = await tab.page.evaluateHandle(id => window.__sharedMirror?.getNode(id), node);
+          try {
+            const element = handle.asElement();
+            if (!element) throw Error('File input no longer exists');
+            return await session.setFiles(tab, element, staged.paths);
+          } finally { await handle.dispose(); }
+        });
+        staged = null; // Chrome may read selected files later, so retain until navigation/tab close.
+        return json(res, {files:result});
+      } catch (err) {
+        if (staged) await uploads.remove(staged.id);
+        return json(res, {error:err.message}, 400);
+      } finally { activeUploads--; }
+    }
     if (req.method !== "GET")
       return json(res, { error: "Method not allowed" }, 405);
+    if (url.pathname.startsWith('/download/')) {
+      const item = downloads.items.get(url.pathname.slice('/download/'.length));
+      if (!item?.path || item.status !== 'completed') return json(res, {error:'Download is not available'}, 404);
+      res.writeHead(200, {'Content-Type':'application/octet-stream', 'Content-Length':item.bytes,
+        'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(item.name).replace(/'/g,'%27'),
+        'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff',
+        'Content-Security-Policy':"sandbox; default-src 'none'"});
+      const stream = createReadStream(item.path);
+      stream.on('error', () => res.destroy());
+      res.on('close', () => stream.destroy());
+      return stream.pipe(res);
+    }
     if (url.pathname === "/status") return json(res, await session.state());
     if (url.pathname === "/asset") {
       const resource = session.tabs
@@ -443,6 +551,13 @@ wss.on("connection", (ws, req) => {
         }
         if (message.generation !== t.generation)
           throw Error("Page changed; wait for the updated view");
+        if (message.type === 'cancelChooser') {
+          if (t.chooser?.public.id === message.chooser) {
+            t.chooser = null;
+            await session.update();
+          }
+          return;
+        }
         if (message.type === "click") {
           if (Number.isInteger(message.node) && message.node > 0) {
             const handle = await t.page.evaluateHandle(
@@ -499,7 +614,7 @@ wss.on("connection", (ws, req) => {
               if (!/INPUT|TEXTAREA|SELECT/.test(e.tagName))
                 throw Error("Unsupported input");
               if (e.type === "file")
-                throw Error("File transfer is not enabled yet");
+                throw Error("Use the file picker to select files");
               e.focus();
               const proto =
                 e.tagName === "TEXTAREA"
@@ -581,6 +696,7 @@ async function stop() {
   running = false;
   for (const ws of sockets) ws.close();
   await browser.close();
+  await fs.rm(transferDir, {recursive:true, force:true});
   rpc.close();
   httpServer.close();
   await fs.unlink(socketPath).catch(() => {});

@@ -198,3 +198,31 @@ The live viewer already works with the restored rule; no production release was
 triggered. Older release policies can still overwrite it. GitHub CI may run for
 the source commits; the initial unsigned REST commit does not meet the signed-head
 check, so a GitHub-signed follow-up was created without rewriting history.
+
+## File transfer implementation and desktop acceptance (2026-09-14)
+
+Implemented viewer file selection, streamed HTTP upload transport (bounded multipart
+buffering at the server), private staging, real Chrome file input population,
+agent setFiles/chooseFiles/getDownloads, custom picker prompts, and authenticated
+download links. All 10 unit tests passed. All 11 transfer integration checks passed
+against both an isolated browser on port 8794 and the deployed pilot. All 15 existing
+browser integration checks also passed after deployment.
+
+Actual Mac Chrome viewer UI opened its native picker, selected mac-upload.txt, and
+showed Attached. Remote Chrome read its exact 32 bytes, preview and SHA-256
+5865ab4fb980780021dcf3bdcc7b37204519595d78131167e9226d0c236b8ea1.
+An actual stdio MCP call then attached agent-upload.txt from procbox; both sides
+showed its 29 bytes and preview. The Mac viewer's sample Save link emitted a
+browser download event. HTTP integration checks separately verified exact download
+contents and owner-only access. The custom-picker prompt appeared in the real
+viewer and Cancel dismissed it while preserving the existing selection.
+
+Deployment required a service restart. The previous fixture's message, color,
+checkbox, Notes, saved output, counter and activity were backed up privately and
+restored; this is a one-time fixture migration, not generic unsaved-page recovery.
+The first rsync attempt hit a transient SSH timeout; retry succeeded and the
+running fixture was verified to contain all three new file inputs.
+
+Physical iPhone picker, Photos/Files-provider behavior, and download saving remain
+for user acceptance. The next user step is refreshing the viewer and choosing a
+small test file in the File transfers section. WebAuthn remains unimplemented.

@@ -2,7 +2,7 @@ import vm from "node:vm";
 import { parse } from "acorn";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export const instructions = `Shared remote Chrome control on procbox. Use js with persistent JavaScript bindings and await. First call: await cua.getState(). Then const browser = await cua.getBrowser(); const tab = await browser.tabs.get(TAB_ID), or await cua.getTab(TAB_ID). Browser supports tabs.list(), tabs.new(url), tabs.get(id). Tab supports goto(url), getState(), getAXState(), domSnapshot(), screenshot(), getScreenshot(), back(), forward(), reload(), close(), click(nodeIdOrSelector), setValue(nodeId,text), typeText(text), type(selector,text), pressKey(key), scroll({x,y}), select(selector,value), handleDialog({accept,text}). tab.playwright.getByRole(role,{name,exact}), getByText(text,{exact}), getByLabel(text), locator(css) support click(), fill(text), innerText(), count(). This locator syntax is optional; plain tab methods work. nodeRepl.write(value) emits observations. nodeRepl.emitImage(await tab.screenshot()) emits an image. cua.requestHumanInput(message) displays a request in the viewer without locking either participant. cua.getState() includes the authenticated viewer URL and active controller. Humans and agents share access; actions execute in order. Re-observe before acting and after reconnect. No actions are automatically replayed. js_reset clears bindings without closing Chrome. This is a browser-only pilot: file transfer is a later acceptance stage. Do not claim support for native desktop apps, hardware passkey forwarding, or unsupported rendered content.`;
+export const instructions = `Shared remote Chrome control on procbox. Use js with persistent JavaScript bindings and await. First call: await cua.getState(). Then const browser = await cua.getBrowser(); const tab = await browser.tabs.get(TAB_ID), or await cua.getTab(TAB_ID). Browser supports tabs.list(), tabs.new(url), tabs.get(id). Tab supports goto(url), getState(), getAXState(), domSnapshot(), screenshot(), getScreenshot(), back(), forward(), reload(), close(), click(nodeIdOrSelector), setValue(nodeId,text), typeText(text), type(selector,text), pressKey(key), scroll({x,y}), select(selector,value), handleDialog({accept,text}), setFiles(nodeIdOrSelector,absoluteRemotePaths), chooseFiles(absoluteRemotePaths) for a pending custom picker, getDownloads(). tab.playwright.getByRole(role,{name,exact}), getByText(text,{exact}), getByLabel(text), locator(css) support click(), fill(text), innerText(), count(). This locator syntax is optional; plain tab methods work. nodeRepl.write(value) emits observations. nodeRepl.emitImage(await tab.screenshot()) emits an image. cua.requestHumanInput(message) displays a request in the viewer without locking either participant. cua.getState() includes the authenticated viewer URL and active controller. Humans and agents share access; actions execute in order. Re-observe before acting and after reconnect. No actions are automatically replayed. js_reset clears bindings without closing Chrome. Uploads support up to 10 files, 10 MB each and 20 MB total. Paths refer to the remote browser host. Download records include private remote paths when complete. This is a browser-only pilot. Do not claim support for native desktop apps, hardware passkey forwarding, or unsupported rendered content.`;
 
 function names(pattern) {
   if (pattern.type === "Identifier") return [pattern.name];
@@ -152,6 +152,7 @@ export class AgentRuntime {
         };
         return {
           click: () => mutation(() => one(clickElement)),
+          setInputFiles: paths => mutation(() => one(n => s.setFiles(tab, n, paths))),
           select: value => mutation(()=>one(n=>feedback("select",n,()=>n.select(value)))),
           fill: (text) =>
             mutation(() =>
@@ -204,6 +205,11 @@ export class AgentRuntime {
           typeof target === "number"
             ? mutation(() => byNode(target, clickElement))
             : locator("css", target).click(),
+        setFiles: (target, paths) => typeof target === "number"
+          ? mutation(() => byNode(target, n => s.setFiles(tab, n, paths)))
+          : locator("css", target).setInputFiles(paths),
+        chooseFiles: paths => mutation(() => s.chooseFiles(tab, paths)),
+        getDownloads: () => s.downloads(true),
         type: (selector, text) => locator("css", selector).fill(text),
         typeText: (text) => mutation(async () => {
           const focused=await page.$(":focus");

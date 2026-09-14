@@ -132,6 +132,16 @@
           </p>
         </section>
       </div>
+      <section class="card" style="margin-top:24px">
+        <h2>File transfers</h2>
+        <p>Choose a small test file. Remote Chrome will show its name, size and SHA-256 below. Text files also show a short preview.</p>
+        <label>Single file<input id="upload-single" type="file"></label>
+        <label>Multiple files<input id="upload-multiple" type="file" multiple></label>
+        <input id="upload-custom" type="file" hidden>
+        <button id="custom-upload">Custom upload button</button>
+        <output id="file-result" style="white-space:pre-wrap;overflow-wrap:anywhere">No files selected.</output>
+        <p><button id="download-sample">Download sample file</button></p>
+      </section>
       <section class="card" style="margin-top: 24px">
         <h2>Session activity</h2>
         <p id="activity">The browser is ready.</p>
@@ -142,6 +152,27 @@
       </section>
     </main>
     <script>
+      let fileChanges = 0;
+      for (const id of ['upload-single','upload-multiple','upload-custom']) {
+        document.getElementById(id).addEventListener('change', async event => {
+          const revision = ++fileChanges;
+          const summaries = [];
+          for (const file of event.target.files) {
+            const bytes = await file.arrayBuffer();
+            const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
+            const preview = file.type.startsWith('text/') || /\.(txt|md|csv|json)$/.test(file.name)
+              ? '\nPreview: '+new TextDecoder().decode(bytes.slice(0,300)) : '';
+            summaries.push(file.name+' · '+file.size+' bytes\nSHA-256: '+hash+preview);
+          }
+          if (revision === fileChanges) document.getElementById('file-result').textContent = 'Selection '+revision+' ('+id+')\n'+(summaries.join('\n\n') || 'Selection cleared.');
+        });
+      }
+      document.getElementById('custom-upload').onclick = () => document.getElementById('upload-custom').click();
+      document.getElementById('download-sample').onclick = () => {
+        const url = URL.createObjectURL(new Blob(['Shared browser download test.\n'], {type:'text/plain'}));
+        const link = document.createElement('a'); link.href=url; link.download='shared-browser-sample.txt'; link.click();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+      };
       let count = 0;
       document.querySelector("#increment").onclick = () => {
         document.querySelector("#count").textContent = ++count;
