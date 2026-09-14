@@ -7,19 +7,15 @@ and to keep it there.
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
 
-Native Codex browser routing is configured on every install: Mac Chrome when
-available, otherwise the host's native runtime. Set up the Mac relay once using
-[the native browser guide](docs/native-browser.md).
+The recommended browser workflow is **shared remote Chrome**, with simultaneous
+agent/human interaction and a private DOM viewer that works on computers and
+phones. It replaces the Mac SSH relay and noVNC workflow on procbox and demobox.
+See [installation and agent invocation](docs/shared-browser-install.md).
 
-Include the optional **noVNC browser viewer** with one command:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh -s -- --with-browser
-```
-
-Already set up? The same command checks and repairs the installation, preserving
-authentication and browser profiles. Browser installation and private viewer
-access are reported separately; see [the browser runbook](docs/browser.md).
+The general bootstrap still provides the legacy native routing and optional
+`--with-browser` Chromium/noVNC dependencies on fresh hosts. Install the shared
+runtime afterward using the guide above. Once installed, provisioning preserves
+its MCP default. Existing browser profiles and authentication are retained.
 
 Nothing to paste, no secret to carry, nothing self-hosted. A new machine asks you
 to approve two links — Tailscale, then Proton Pass — and does the rest itself.
@@ -74,8 +70,8 @@ It is built for a mobile SSH client (Termius, Blink):
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
 | tmux scrolling | Mouse/trackpad scrollback enabled automatically, including in an existing tmux server |
 | g2-terminal | installed from its private release |
-| Native browser control | `cua_repl`: Mac-first native Chrome control over SSH, local fallback; [setup](docs/native-browser.md) |
-| Browser viewer (pilot) | `--with-browser`: optional Linux browser with private noVNC viewing; [operations](docs/browser.md) |
+| Shared browser (recommended) | `shared_browser_repl`: persistent host Chrome with simultaneous DOM viewing and input; [setup](docs/shared-browser-install.md) |
+| Legacy browser fallback | Mac relay and noVNC remain available for explicitly requested fallback tasks |
 
 Mouse scrolling uses tmux's normal copy-mode bindings: scroll up to browse
 history, then scroll to the bottom or press `q` to return to the application.

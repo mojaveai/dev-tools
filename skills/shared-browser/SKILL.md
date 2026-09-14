@@ -1,75 +1,49 @@
 ---
 name: shared-browser
-description: Use native cua_repl routing on dev-tools hosts, with Mac Chrome preferred and local native fallback; identify the active browser destination and use the optional noVNC viewer for explicit manual fallback tasks.
+description: Control persistent remote Chrome with shared_browser_repl on dev-tools hosts; share the DOM viewer with the user for simultaneous browsing, files, and supported passkey handoffs.
 ---
 
-Use the `cua_repl` MCP for Codex browser work on dev-tools hosts. Each JavaScript
-result identifies the selected machine. It prefers a connected Mac Chrome
-extension, otherwise a connected local browser. Follow the tool's returned API
-and permission instructions. The legacy `dev-tools-browser` and
-`dev-tools-mac-browser` MCPs are retired.
+Use the registered `shared_browser_repl` MCP for browser work. It replaces the
+Mac SSH browser relay and noVNC workflow on hosts with the shared runtime installed.
+First call `js` with `await cua.getState()`. Share the returned `viewerUrl` so the
+user can watch and interact on a computer or iPhone connected to Tailscale.
 
-Selection happens on the first `js` call with a connected browser. If neither
-machine has a browser, discovery can be retried in the same MCP connection after
-the user opens ChatGPT desktop and Chrome on the browser host. The Mac extension
-requires that desktop app; a headless Codex app-server alone does not supply it.
-`dev-tools native-browser check --json` distinguishes tunnel failures from a
-runtime with no connected browser. It reports `unavailable` when neither works.
+Follow the tool's returned API. Typical calls:
 
-After dispatch, the destination stays pinned until `js_reset`. A successful
-reset releases it; the next `js` may select a different machine. Inspect the
-reported destination and fresh browser state before continuing. If a connection
-drops during an action, its outcome may be unknown: reset and inspect, never
-replay that action automatically. Do not weaken permissions to make a route work.
+```js
+const browser = await cua.getBrowser();
+const tab = await browser.tabs.new('https://example.com');
+nodeRepl.write(await tab.getAXState());
+```
 
-`dev-tools native-browser check` reports current route availability but does not
-change the destination of an existing connection. Native tools require genuine
-Codex task/turn metadata and approval callbacks from the registered MCP connection;
-do not manufacture approvals. If `cua_repl` is missing from available tools,
-reconnect MCP or start a fresh task. Installation automatically restores a missing
-registration on Linux hosts with user systemd. `check` only checks the route,
-not the current task's tool registration or approval support.
+Use fresh node IDs for `tab.click(id)` / `tab.setValue(id, text)`, or the supported
+selectors. Scroll with `tab.scroll({x:0,y:500})`. Inspect after actions, navigation,
+and reconnect. Bindings persist within an MCP connection; `js_reset` clears
+bindings without stopping Chrome. Do not automatically repeat an action whose
+outcome is uncertain after a disconnect.
 
-Do not launch the native runtime from a shell or `node_repl` and build a custom
-MCP client. That client does not inherit Codex's approval handling. `JavaScript
-execution requires an approval elicitation` indicates a client integration
-problem; asking for blanket user permission cannot configure a missing callback.
+Humans and agents can interact simultaneously; there is no Take control button.
+Viewer disconnection does not stop the browser. Give the user time to finish
+requested input, and confirm the result from current page state.
 
-For an explicitly requested noVNC fallback, use `dev-tools browser start NAME
---json` and share the returned `viewer_url`. These are separate viewer sessions;
-verify the exact browser/tab before claiming the viewer shows native CUA actions.
-Missing publication is diagnosed with `dev-tools browser doctor --json`.
+File inputs support human uploads from the viewer and agent uploads via
+`tab.setFiles(nodeIdOrSelector, ['/absolute/remote/path'])`. Downloads appear in
+the viewer's collapsed Downloads section. `tab.getDownloads()` provides agent
+paths. Limits: 10 files, 10 MB each, 20 MB per upload batch.
 
-- When login or human input is needed, stop browser actions and run
-  `dev-tools browser request-input SESSION --message "Please sign in, then click Done" --json`.
-  Share the viewer URL and explain the task. The viewer enables input and shows
-  a Done button automatically; do not ask the user to find noVNC settings.
-- Save the returned request ID. Wait with
-  `dev-tools browser wait-input SESSION --request-id ID --timeout 60 --json`.
-  Repeat while that same request is pending. Resume browser actions only when
-  that request reports `completed` (the user clicked Done), or the user explicitly
-  confirms completion in conversation. For conversational completion, use
-  `dev-tools browser cancel-input SESSION --request-id ID` to return to view-only.
-  Timeout, viewer disconnect, cancellation, or a different request ID is not
-  permission to resume. Never put passwords in the handoff message or ask for
-  passwords in chat. This cooperative handoff does not mechanically block MCP actions.
+On procbox, Agent Trace QA passkey requests appear above the viewer with an
+Approve with passkey link. The user opens it on their own device, verifies with
+their registered authenticator, and returns to the viewer. Verify the portal
+actually signed in before reporting success. This is a site-specific adapter,
+not universal passkey forwarding; demobox does not have that portal adapter.
+Never request passwords, passkey private material, or biometric data in chat.
 
-`browser stop ID` preserves the profile; deleting a profile is explicit cleanup.
-Do not change tailnet policy just to make a viewer reachable. Sessions share their
-OS user's privileges and are not isolation boundaries between untrusted agents.
+If tools are absent, reconnect MCP or start a new agent session. Diagnose with
+`dev-tools shared-browser status` and `systemctl --user status dev-tools-shared-browser`.
+Start a stopped runtime with `dev-tools shared-browser start`. Do not use the
+Mac relay or noVNC unless the user explicitly requests that fallback. Do not
+change tailnet ACLs to fix reachability without an authorized network task.
 
-If discovery reports `unconfirmed`, `discovery_timeout`, or a transport failure,
-report that connection verification failed temporarily, not that Chrome is
-closed or absent. Discovery already performs bounded retries; after a short
-pause, retry the registered tool's discovery before declaring browser work
-blocked. After a stream loss, reset and recreate JavaScript bindings. An idle
-loss has no pending action; an in-flight action may have completed and must not
-be replayed. Never silently substitute a local browser when the user requested
-the Mac browser.
-
-For `relay_socket_missing` or `relay_unreachable`, the failure is the relay
-endpoint/transport, not evidence that Chrome or ChatGPT is closed. Do not ask
-the user to restart those apps for this error. Retry discovery after a short
-delay; the supervisor repairs a deleted endpoint on its next heartbeat. If it
-persists, inspect the Mac LaunchAgent logs and the remote endpoint/owner before
-restarting the relay. `js_reset` clears runtime state; it cannot repair a socket.
+Each host has one shared browser profile for its OS user. It is not isolation
+between unrelated agents. DOM replay has limitations for canvas, video and
+other non-DOM content; do not describe it as universal native desktop control.

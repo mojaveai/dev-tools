@@ -1,6 +1,10 @@
 #!/bin/sh
 # Native CUA routing is independent of the optional Linux viewer packages.
 mod_native_browser() {
+    if [ -x "$HOME/.local/bin/dev-tools-shared-browser" ]; then
+        note "shared_browser_repl is the installed browser default; leaving native routing retired"
+        return "$RC_OK"
+    fi
     have python3 || { note "Python >=3.11 required for native browser routing"; return 1; }
     ensure_dirs || return 1
     if [ -e "$BIN_DIR/dev-tools" ] && [ ! -L "$BIN_DIR/dev-tools" ]; then

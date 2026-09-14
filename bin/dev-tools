@@ -19,6 +19,11 @@ if len(sys.argv) > 1 and sys.argv[1] == "native-browser":
         sys.exit("Usage: dev-tools native-browser {check|mcp|install-mac} [options]")
 elif len(sys.argv) > 1 and sys.argv[1] == "shared-browser":
     import shutil
+    if sys.argv[2:3] == ["install"]:
+        os.execv("/bin/sh", ["sh", str(repo / "shared_browser/install.sh")])
+    installed = Path.home() / ".local/bin/dev-tools-shared-browser"
+    if installed.is_file():
+        os.execv(str(installed), [str(installed), *sys.argv[2:]])
     node = shutil.which("node")
     if not node:
         sys.exit("Node.js is required for shared-browser")

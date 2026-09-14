@@ -30,7 +30,7 @@ const read = async (code) =>
 function viewer() {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket("ws://127.0.0.1:8791/ws?width=390&height=700", {
-      origin: "https://procbox.agent-trace.ts.net:8443",
+      origin: process.env.SHARED_BROWSER_ORIGIN || "https://procbox.agent-trace.ts.net:8443",
       headers: { "Tailscale-User-Login": "manbir@asgroup.ai" },
     });
     const messages = [];
