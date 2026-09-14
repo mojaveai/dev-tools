@@ -1,3 +1,4 @@
+import { rewriteAssets } from "./replay-assets.mjs";
 import { controlVisibility } from "./control-visibility.js";
 import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
@@ -115,40 +116,7 @@ function fit() {
   agentPointer.layer.style.transform=`scale(${scale})`;
 }
 function rewrite(event, tab) {
-  const clone = structuredClone(event);
-  // rrweb inlines CSS and image data where possible. Remaining HTTP assets are
-  // served from responses already fetched by the authoritative browser.
-  const asset = (url) =>
-    /^https?:/.test(url)
-      ? `/asset?tab=${encodeURIComponent(tab)}&url=${encodeURIComponent(url)}`
-      : url;
-  const css = (text) =>
-    text.replace(
-      /url\(\s*(['"]?)(https?:[^)'"\s]+)\1\s*\)/g,
-      (_, q, url) => `url("${asset(url)}")`,
-    );
-  const walk = (value) => {
-    if (!value || typeof value !== "object") return;
-    if (value.attributes) {
-      const a = value.attributes;
-      for (const key of ["src", "poster", "xlink:href"])
-        if (typeof a[key] === "string") a[key] = asset(a[key]);
-      if (value.tagName === "link" && a.href) a.href = asset(a.href);
-      if (a.srcset) delete a.srcset;
-      for (const key of ["style", "_cssText"])
-        if (typeof a[key] === "string") a[key] = css(a[key]);
-    }
-    if (
-      value.type === 3 &&
-      typeof value.textContent === "string" &&
-      value.isStyle
-    )
-      value.textContent = css(value.textContent);
-    for (const v of Object.values(value))
-      if (typeof v === "object") Array.isArray(v) ? v.forEach(walk) : walk(v);
-  };
-  walk(clone);
-  return clone;
+  return rewriteAssets(event,tab,state?.tabs.find(t=>t.id===tab)?.url);
 }
 // Keep browser-native controls in the parent document. Sandboxed replay frames
 // are visual-only: Safari blocks parent-installed handlers inside those frames.
@@ -254,13 +222,12 @@ function wireFrame() {
     const css=doc.defaultView.getComputedStyle(source);
     // Cache style/options signatures: assigning unchanged styles and rebuilding
     // a native select on every mouse/scroll event disrupts mobile interaction.
-    const styleNames=["font","color","background-color","border","border-radius",
-      "padding","text-align","box-sizing","line-height","letter-spacing","appearance"];
+    const styleNames=["font","color","background-color","border-top","border-right","border-bottom","border-left","border-radius",
+      "outline","outline-offset","box-shadow","padding","text-align","box-sizing","line-height","letter-spacing","appearance"];
     const styleSignature=styleNames.map(name=>css.getPropertyValue(name)).join(";");
     if (field.dataset.styleSignature!==styleSignature) {
       field.dataset.styleSignature=styleSignature;
-    for (const name of ["font","color","background-color","border","border-radius",
-      "padding","text-align","box-sizing","line-height","letter-spacing","appearance"]) {
+    for (const name of styleNames) {
       field.style.setProperty(name,css.getPropertyValue(name));
     }
     }
@@ -294,6 +261,7 @@ function wireFrame() {
   reveal();
 }
 function showTab(id) {
+  const changed=active!==id;
   agentPointer.reset();
   cancelAnimationFrame(momentumFrame);scrollSync.clear();
   if (replayer) {
@@ -303,6 +271,13 @@ function showTab(id) {
   $("replay").replaceChildren();
   overlay?.remove(); overlay=null; controls.clear();
   active = id;
+  if(changed && connected && id) {
+    const size=dimensions();lastWidth=size.width;
+    $("viewport").style.visibility="hidden";
+    // New agent tabs otherwise retain Chrome's launch viewport until the
+    // next viewer resize/reconnect. Request sizing once per tab switch.
+    send({type:'resize',...size});
+  }
   const cache = caches.get(id);
   if (!cache?.events.some((e) => e.type === 2)) return;
   generation = cache.generation;

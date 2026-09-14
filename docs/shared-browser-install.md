@@ -140,3 +140,30 @@ this change and verifies that the spinner transform advances during idle time
 afterward. Hash/history navigation and redirects still pass. This enables CSS
 animations; canvas and JavaScript-driven animations retain their existing limits.
 Refresh the viewer to load this client-only update.
+
+## Outlook acceptance pass (2026-09-14)
+
+External-site testing reached Microsoft sign-in, inbox reading, recipient
+suggestions and a saved unsent draft. User observations: missing Authenticator
+number border, undersized initial pane with a later expansion/stutter, and missing
+compose icons/images. No email was sent during the test.
+
+Corrections: normalize asset URLs (including dot segments and protocol-relative
+URLs) to Chrome cache keys; rewrite late stylesheet/FontFace asset references;
+keep SVG fragments separate from fetch URLs; suppress replay prefetch/modulepreload
+requests for scripts that the visual replay never executes. Previously failing
+Outlook Fluent icon fonts changed from error to loaded in an isolated viewer
+against the same live tab. Failed requests dropped from dozens to a favicon.
+Some email images are blocked by Outlook itself; blocked-content policy was not
+changed. The exact Authenticator border still needs verification in a later
+sign-in; asymmetric border and outline preservation is covered by a fixture.
+
+The viewer now requests its size on tab switches, rather than leaving new agent
+tabs at Chrome's default size until a later resize/reconnect. It hides the initial
+mismatched viewport until the correctly sized replay is ready. Mirrored inputs
+copy per-side borders, outlines and shadows. All 16 unit checks pass, plus live
+spinner, hash/history/redirect, asymmetric border and new-tab sizing checks.
+
+Remaining engine observations from Outlook: AX/DOM observations currently cap
+at 150 elements, combined key shortcuts are not parsed, and rich-text human
+editing needs its own acceptance pass. These are distinct from the visual fixes.

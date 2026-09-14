@@ -13,7 +13,7 @@ const origin='http://127.0.0.1:8801';
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/redirect'){res.writeHead(302,{Location:'/done'});return res.end();}
  res.setHeader('Content-Type','text/html');
- res.end(`<style>@keyframes spin{to{transform:rotate(360deg)}}.spinner{width:24px;height:24px;border:3px solid gray;border-top-color:blue;border-radius:50%;animation:spin .8s linear infinite}</style><div class="spinner"></div><h1 id="route">${req.url==='/done'?'Full navigation done':'Initial page'}</h1><a id="hash" href="#next">Hash route</a><button id="push" onclick="history.pushState({},'', '/pushed');document.querySelector('h1').textContent='Push route done'">Push route</button><a id="full" href="/redirect">Full navigation</a><script>onhashchange=()=>document.querySelector('h1').textContent='Hash route done'</script>`);
+ res.end(`<style>@keyframes spin{to{transform:rotate(360deg)}}.spinner{width:24px;height:24px;border:3px solid gray;border-top-color:blue;border-radius:50%;animation:spin .8s linear infinite}</style><div class="spinner"></div><input aria-label="Test code" style="border:2px solid black;border-right-width:3px;border-bottom-width:4px;border-left-width:5px;outline:1px solid red;box-shadow:0 0 2px black"><h1 id="route">${req.url==='/done'?'Full navigation done':'Initial page'}</h1><a id="hash" href="#next">Hash route</a><button id="push" onclick="history.pushState({},'', '/pushed');document.querySelector('h1').textContent='Push route done'">Push route</button><a id="full" href="/redirect">Full navigation</a><script>onhashchange=()=>document.querySelector('h1').textContent='Hash route done'</script>`);
 });
 await new Promise(r=>fixture.listen(8802,'127.0.0.1',r));
 const worker=spawn(process.execPath,[new URL('../server.mjs',import.meta.url).pathname],{env:{...process.env,SHARED_BROWSER_PORT:'8801',SHARED_BROWSER_ORIGIN:origin},stdio:['ignore','pipe','pipe']});
@@ -44,6 +44,18 @@ try {
  console.log('PASS: pushState navigation renders without refresh');
  await act('#full');await wait(()=>rendered('Full navigation done'),'redirect and new document without viewer refresh');
  console.log('PASS: full navigation and redirect render without refresh');
+ const border=await page.$eval('#controls input[aria-label="Test code"]',e=>{
+  const s=getComputedStyle(e);return [s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth,s.outlineWidth];
+ }).catch(async()=>page.$eval('input[aria-label="Test code"]',e=>{
+  const s=getComputedStyle(e);return [s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth,s.outlineWidth];
+ }));
+ assert.deepEqual(border,['2px','3px','4px','5px','1px']);
+ console.log('PASS: native overlay preserves asymmetric borders and outline');
+ await rpc('js',{context:'navigation-test',code:"const next=await browser.tabs.new('http://127.0.0.1:8802/');nodeRepl.write('new tab');"});
+ await wait(()=>rendered('Initial page'),'new tab rendered');
+ await wait(()=>page.$eval('#replay iframe',(e,width)=>Number(e.width)===width,788),'new tab fits connected viewer');
+ console.log('PASS: new agent tab adopts connected viewer width without reconnect');
+
 }finally{
  if(browser)await browser.close();
  worker.kill('SIGTERM');await new Promise(r=>worker.exitCode!==null?r():worker.once('exit',r));
