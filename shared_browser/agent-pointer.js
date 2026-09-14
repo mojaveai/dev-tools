@@ -12,57 +12,78 @@ export class AgentPointer {
     this.label=this.layer.querySelector('.agent-label');
     this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
-  reset() {clearTimeout(this.timer);this.motion?.cancel();this.id=null;this.event=null;this.layer.classList.remove('visible');}
+  reset() {
+    clearTimeout(this.timer);cancelAnimationFrame(this.frame);
+    this.rippleMotion?.cancel();this.pressMotion?.cancel();
+    this.id=null;this.event=null;this.pending=null;this.moving=false;
+    this.layer.classList.remove('visible');
+  }
   locate(event,resolve) {
     const r=resolve(event.node);
-    this.rect=r;
-    if(r) {
+    if(r && r.width>0 && r.height>0) {
       Object.assign(this.target.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px'});
       this.target.hidden=false;
       return {x:r.x+r.width/2,y:r.y+r.height/2};
     }
     this.target.hidden=true;
-    return Number.isFinite(event.x)?{x:event.x,y:event.y}:this.position;
+    // Removed/replaced targets must not hide the cursor or send it back to
+    // stale server coordinates after scrolling. Retain the last known point.
+    return this.destination || (Number.isFinite(event.x) && Number.isFinite(event.y)
+      ? {x:event.x,y:event.y} : this.position);
+  }
+  paint(point) {
+    this.position={...point};
+    this.cursor.style.transform=`translate(${point.x}px,${point.y}px)`;
   }
   refresh() {
-    if(!this.event || !this.resolve || !this.base)return;
-    const end=this.locate(this.event,this.resolve);
-    this.cursor.style.opacity=this.event.node && this.target.hidden ? "0" : "1";
-    this.cursor.style.left=(end.x-this.base.x)+"px";
-    this.cursor.style.top=(end.y-this.base.y)+"px";
-    this.position=end;
+    if(!this.event || this.pending || this.layer.dataset.phase!=='start')return;
+    this.destination=this.locate(this.event,this.resolve);
+    if(!this.moving)this.paint(this.destination);
+  }
+  finish(event) {
+    if(event.id!==this.id)return;
+    this.layer.dataset.phase=event.phase;
+    this.label.textContent=event.phase==='failed'?'Agent · action failed':event.kind==='typing'?'Agent · edited':'Agent';
+    if(event.phase==='done' && event.kind==='click') {
+      Object.assign(this.ripple.style,{left:this.position.x+'px',top:this.position.y+'px'});
+      this.rippleMotion?.cancel();
+      this.rippleMotion=this.ripple.animate([{opacity:.8,transform:'translate(-50%,-50%) scale(.3)'},{opacity:0,transform:'translate(-50%,-50%) scale(2.4)'}],{duration:this.reduced?0:520,easing:'ease-out'});
+      this.pressMotion?.cancel();
+      this.pressMotion=this.cursor.querySelector('svg').animate([{transform:'scale(1)'},{transform:'scale(.82)'},{transform:'scale(1)'}],{duration:this.reduced?0:220});
+    }
+    this.timer=setTimeout(()=>this.layer.classList.remove('visible'),10000);
   }
   handle(event,resolve) {
-    clearTimeout(this.timer);
     if(event.phase==='start') {
-      this.id=event.id;this.event=event;this.resolve=resolve;this.layer.classList.add('visible');
+      clearTimeout(this.timer);cancelAnimationFrame(this.frame);
+      this.rippleMotion?.cancel();this.pressMotion?.cancel();
+      this.id=event.id;this.event=event;this.resolve=resolve;this.pending=null;
+      this.destination=null;
+      this.layer.classList.add('visible');
       this.layer.dataset.kind=event.kind;this.layer.dataset.phase='start';
       this.label.textContent={click:'Agent · click',typing:'Agent · typing',select:'Agent · select',scroll:'Agent · scrolling'}[event.kind] || 'Agent';
-      const end=this.locate(event,resolve),start=this.position;
-      this.base=end;this.cursor.style.left="0px";this.cursor.style.top="0px";this.cursor.style.opacity="1";
-      this.motion?.cancel();
-      this.cursor.style.transform=`translate(${end.x}px,${end.y}px)`;
+      this.destination=this.locate(event,resolve);
+      const start={...this.position},began=performance.now();
       const duration=this.reduced?0:Math.min(400,event.duration||240);
-      this.motion=this.cursor.animate([
-        {transform:`translate(${start.x}px,${start.y}px) rotate(-5deg)`},
-        {transform:`translate(${(start.x+end.x)/2}px,${(start.y+end.y)/2-18}px) rotate(3deg)`,offset:0.55},
-        {transform:`translate(${end.x}px,${end.y}px) rotate(0deg)`}
-      ],{duration,easing:'cubic-bezier(.2,.8,.25,1)'});
-      this.position=end;
-    } else if(event.id===this.id) {
-      const finish=()=>{
-        this.refresh();
+      this.moving=true;
+      const step=now=>{
         if(event.id!==this.id)return;
-        this.layer.dataset.phase=event.phase;
-        this.label.textContent=event.phase==='failed'?'Agent · action failed':event.kind==='typing'?'Agent · edited':'Agent';
-        if(event.phase==='done' && event.kind==='click') {
-          Object.assign(this.ripple.style,{left:this.position.x+'px',top:this.position.y+'px'});
-          this.ripple.animate([{opacity:.8,transform:'translate(-50%,-50%) scale(.3)'},{opacity:0,transform:'translate(-50%,-50%) scale(2.4)'}],{duration:this.reduced?0:520,easing:'ease-out'});
-          this.cursor.animate([{scale:'1'},{scale:'.82'},{scale:'1'}],{duration:this.reduced?0:220});
+        if(!this.pending)this.destination=this.locate(event,resolve);
+        const t=duration?Math.min(1,(now-began)/duration):1;
+        const ease=1-Math.pow(1-t,3);
+        this.paint({x:start.x+(this.destination.x-start.x)*ease,y:start.y+(this.destination.y-start.y)*ease});
+        if(t<1)this.frame=requestAnimationFrame(step);
+        else {
+          this.moving=false;
+          if(this.pending)this.finish(this.pending);
         }
-        this.timer=setTimeout(()=>this.layer.classList.remove('visible'),10000);
       };
-      (this.motion?.finished || Promise.resolve()).then(finish,()=>{});
+      this.frame=requestAnimationFrame(step);
+    } else if(event.id===this.id) {
+      // Freeze the last observed target when the action completes. Its click
+      // handler may already have removed it or laid out an entirely new page.
+      this.pending=event;
+      if(!this.moving)this.finish(event);
     }
   }
 }

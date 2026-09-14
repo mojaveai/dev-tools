@@ -103,3 +103,17 @@ real viewer/browser checks pass for hash routing, pushState, and full navigation
 through a redirect, both with the old server/new viewer and with both fixes.
 This test runs on separate local ports and a disposable profile, without touching
 production portal state. All 14 shared-browser unit checks also pass.
+
+## Cursor continuity fix (2026-09-14)
+
+Cursor movement now has one requestAnimationFrame position writer, replacing
+competing Web Animation transforms and layout offsets. New actions start at
+the current displayed position. Completion freezes the last observed target,
+so removal/replacement of a clicked button neither hides the cursor nor pulls
+it toward a new layout. Ripple and cursor share the final point. Movement still
+tracks target position changes before completion. Viewer refresh activates the
+change without restarting Chrome or Codex.
+
+The isolated Chromium pointer test covers target removal, post-click layout
+changes, interruption by the next action, and matching target/ripple coordinates.
+All four checks passed, alongside the 14 shared-browser unit checks.
