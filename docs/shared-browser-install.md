@@ -34,7 +34,11 @@ Procbox's operational profile is
 and `dev-tools-shared-chrome-primary.service`. It was promoted from the tested
 session; the standard MCP and port 8443 viewer now use that same session.
 The older profile remains at `~/.local/state/dev-tools/shared-browser/profile`;
-its Chrome host is retained but disabled for automatic startup. Its original
+its Chrome host must be stopped and disabled, while the profile is retained.
+Disabling automatic startup alone leaves live tabs polling; copied signed-in
+tabs can repeatedly invalidate the selected browser's application session.
+The installer retires the previous managed host when changing the receiver's
+host dependency. Ordinary updates preserve the selected live browser. Its original
 `browser-host.json` retains the older Chrome endpoint for explicit recovery.
 
 The installer keeps the original `shared-browser/server.sock` as a compatibility
