@@ -178,3 +178,21 @@ If the owner-only grant was applied, remove that exact grant from both the live
 policy and its source of truth. Keep the profile unless deletion is separately
 requested. Other Serve routes, Mac relay configuration, and noVNC profiles remain
 unchanged.
+
+### Embedded-frame handoff regression
+
+`SHARED_BROWSER_CHROME=/path/to/chrome node test/iframe-live.mjs` runs an isolated
+cross-origin frame fixture. It verifies initial images, reconnect snapshots,
+human coordinate clicks, and replacement images after an action. The viewer
+uses direct DOM rebuilds because rrweb 2.1.4's synchronous virtual DOM path can
+lose iframe documents/images. Frame clicks retain the human's page coordinates.
+Recorder snapshot requests also propagate to cross-origin child recorders.
+
+The CAPTCHA acceptance test is human-operated: inspect image loading metadata
+and validate interactions on the fixture; leave challenge selection and submission
+to the viewer. Successful rendering does not guarantee every CAPTCHA provider
+will accept a remote browser.
+
+Recorder bundles are loaded when the server starts. An active session can receive
+`installFrameSnapshots` in its existing frames and new-document hooks without
+closing Chrome; a normal service restart loads it for all future tabs.

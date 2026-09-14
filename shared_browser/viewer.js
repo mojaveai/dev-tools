@@ -141,7 +141,7 @@ function wireFrame() {
       const r = overlay.getBoundingClientRect();
       const x = (e.clientX-r.left)/scale, y = (e.clientY-r.top)/scale;
       const target = replayer.iframe.contentDocument.elementFromPoint(x,y);
-      if (target) send({type:"click",node:replayer.getMirror().getId(target),x,y});
+      if (target) send({type:"click",...(target.tagName === "IFRAME" ? {} : {node:replayer.getMirror().getId(target)}),x,y});
     });
     const point=e => {const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/scale,y:(e.clientY-r.top)/scale};};
     overlay.addEventListener("wheel", e => {
@@ -288,6 +288,9 @@ function showTab(id) {
     {
       root: $("replay"),
       liveMode: true,
+      // rrweb's synchronous virtual-DOM rebuild loses iframe documents and
+      // image data during reconnect. Build directly into the sandboxed DOM.
+      useVirtualDom: false,
       // This is a live page, not a paused recording. Let CSS spinners and
       // other stylesheet animations run even while no DOM events arrive.
       pauseAnimation: false,

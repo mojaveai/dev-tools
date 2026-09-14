@@ -1,3 +1,5 @@
+import { installFrameSnapshots } from "./frame-snapshots.js";
+installFrameSnapshots();
 import { record } from "@rrweb/record";
 // Each document gets a distinct generation; stale viewer input is never replayed.
 const generation = crypto.randomUUID();
