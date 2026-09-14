@@ -8,19 +8,14 @@ import {spawn} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import WebSocket from 'ws';
+import {loopbackEndpoint} from './browser-endpoint.mjs';
+export {loopbackEndpoint} from './browser-endpoint.mjs';
 
 export function xauthority(cookie) {
   const field=value=>{const b=Buffer.isBuffer(value)?value:Buffer.from(value);const n=Buffer.alloc(2);n.writeUInt16BE(b.length);return Buffer.concat([n,b]);};
   // FamilyWild permits the display chosen by Xvfb -displayfd. The random cookie
   // and its private file still authenticate both Chrome and the X server.
   return Buffer.concat([Buffer.from([255,255]),field(''),field(''),field('MIT-MAGIC-COOKIE-1'),field(cookie)]);
-}
-
-export function loopbackEndpoint(value) {
-  const u=new URL(value);
-  if(!['http:','ws:'].includes(u.protocol) || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password)
-    throw Error('Browser endpoint must be uncredentialed loopback HTTP or WebSocket');
-  return u.href;
 }
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));

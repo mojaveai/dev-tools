@@ -5,6 +5,7 @@ import os from 'node:os';
 import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
+import {browserConnection} from './browser-endpoint.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const origin=process.env.PORTAL_ORIGIN || 'https://procbox.agent-trace.ts.net:23581', prefix='/_shared-browser-passkey';
 const requests=new Map(),attached=new WeakSet();
@@ -66,8 +67,11 @@ server.listen(Number(process.env.PORTAL_BRIDGE_PORT || 8797),'127.0.0.1');
 let browser;
 while(true){
  try{
-   const [port]=process.env.PORTAL_BROWSER_WS ? [''] : (await fs.readFile(path.join(os.homedir(),'.local/state/dev-tools/shared-browser/profile/DevToolsActivePort'),'utf8')).split('\n');
-   browser=await puppeteer.connect({...process.env.PORTAL_BROWSER_WS ? {browserWSEndpoint:process.env.PORTAL_BROWSER_WS} : {browserURL:'http://127.0.0.1:'+port},defaultViewport:null});
+   const connection=await browserConnection({
+     stateDir:process.env.SHARED_BROWSER_STATE||path.join(os.homedir(),'.local/state/dev-tools/shared-browser'),
+     endpoint:process.env.PORTAL_BROWSER_WS,
+   });
+   browser=await puppeteer.connect({...connection,defaultViewport:null});
    browser.on('targetcreated',async target=>{try{if(target.type()==='page'){const p=await target.page();if(p)await attach(p);}}catch(e){console.error('Passkey hook attach failed:',e.message);}});
    for(const page of await browser.pages())await attach(page);
    console.log('Passkey handoff connected to shared Chrome');

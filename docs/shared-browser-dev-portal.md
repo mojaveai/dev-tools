@@ -41,6 +41,12 @@ on loopback 8797; its `/agent/state` endpoint exposes only pending handoff links
 local callers and is not routed through the edge. The only public helper prefix
 is `/_shared-browser-passkey/` on the existing tailnet-only 23581 listener.
 
+Chrome discovery prefers the current shared-browser `browser-host.json`; the
+legacy profile `DevToolsActivePort` is used only when no managed host file exists.
+This matters after migrating to the independent native Chrome engine, which does
+not refresh the legacy file. Updating the shared-browser installer also updates
+and restarts an already-active portal helper in its separate runtime.
+
 `portal-passkey-edge.py` imports the exact installed QA identity module, delegates
 all normal requests to its original handler, and adds the helper prefix. The helper
 uses the same host check and tailscale whois admission function, bounded bodies,

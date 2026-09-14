@@ -286,10 +286,10 @@ installation. A navigation-suite rerun initially collided with the iframe suite'
 fixed fixture port; it passed when run after the iframe suite finished. Run those
 two suites sequentially.
 
-The installed browser executable is the existing Chromium-compatible binary
-from the browser provisioner, launched normally rather than by Puppeteer launch.
-Procbox also has system Google Chrome 153.0.8010.36; a controlled binary comparison
-has **not** been performed. Do not attribute results to a particular fingerprint
+The installed browser executable is Chrome for Testing 153.0.8010.12 from the
+browser provisioner, launched normally rather than by Puppeteer launch.
+Procbox also has system Google Chrome 153.0.8010.36; the small follow-up binary
+comparison is recorded below. Do not attribute results to a particular fingerprint
 field, branding, IP reputation, or connector implementation without that control.
 
 Further useful acceptance work should use spaced, prospectively scheduled human
@@ -356,3 +356,93 @@ The private raw trial archive is retained on procbox at
 `1b0b8d3491c1ef7727e48931f5d407d81fbdc8d2208c3f8b011837c2a2803964`.
 Challenge images and resource URLs are deliberately excluded from Git; the
 sanitized aggregate and ordered outcomes are committed with this report.
+
+## Follow-up environment protocol
+
+E1–E4 compare the provisioned Chrome for Testing 153.0.8010.12 (A) with the
+installed ordinary Google Chrome 153.0.8010.36 (B), in A–B–B–A order on procbox.
+Each binary owns a new, isolated persistent test profile and authenticated Xvfb
+display with the same normal launch arguments. Neither has a shared receiver or
+recorder. Use native X11 mouse movement/press/release with a fixed 120 ms press,
+natural window viewport dimensions, and the same manual model solver. Stop each
+fresh widget after three submitted rounds, success, or explicit expiry. Keep
+every outcome; the harness refuses to abandon a nonterminal trial without a
+recorded reason. The production shared session is not restarted or modified.
+
+This is a bounded diagnostic, not a replacement for the V01–V60 validation block.
+Binary branding and patch version change together; profile instances also differ,
+although both start empty. Findings cannot isolate one fingerprint property or
+establish statistical equivalence from four trials.
+
+### Environment results and setup failures
+
+E1 reached an image challenge but expired with no answers submitted while the
+controller recovered missing command output. E2 could not start ordinary Chrome:
+its shipped AppArmor profile existed but was not loaded, and sandbox setup failed
+with a user-namespace permission error. Loading `/etc/apparmor.d/chrome` with
+`apparmor_parser -r` resolved startup, without disabling Chrome's sandbox or
+changing system-wide user-namespace restrictions. E3/E4 were not attempted.
+These setup failures are retained separately from solved CAPTCHA outcomes.
+
+The replacement F1–F4 block used fresh isolated profiles and the same A–B–B–A
+protocol after preflighting both browsers. All four passed with zero explicit
+"try again" responses:
+
+| Trial | Browser | Submitted rounds | Tile selections | Seconds |
+| --- | --- | ---: | ---: | ---: |
+| F1 | Chrome for Testing | 2 | 13 | 68.0 |
+| F2 | Google Chrome | 1 | 3 | 16.9 |
+| F3 | Google Chrome | 0 (checkbox only) | 0 | 1.5 |
+| F4 | Chrome for Testing | 1 | 3 | 11.2 |
+
+Recorder/binding checks were false throughout. Both windows were 1280×900,
+but their natural content heights differed: 757 pixels for Chrome for Testing,
+813 for Google Chrome. Thus this comparison changes binary, patch version,
+profile instance and browser UI geometry together. It establishes that normal
+remote Chrome can pass easily, including checkbox-only verification; it does
+not identify a particular risk signal or justify replacing the production
+binary. Raw logs are in `captcha-environments-zOrmV7` (E) and
+`captcha-environments-rfgAjq` (F) in the private diagnostic archive.
+
+### Final input fidelity changes
+
+Rechecking recorded events found a concrete pressure discrepancy: native X11
+mouse presses reported 0.5; CDP and shared presses in R1–R9 reported zero. The
+viewer now forwards its observed pointer pressure, including zero when that is
+what the originating browser reports. No pressure, motion path or timing is
+randomized to imitate a person.
+
+The previous hover relay allowed only one unacknowledged movement. Its sampling
+rate therefore fell with network round-trip time. The new relay pipelines up to
+32 outstanding frame samples, preserving order while bounding stale movement
+when a receiver stalls. Presses/releases flush the latest position. A live test
+with separate source and viewer browsers and a 200 ms ACK delay checks all 20
+observed positions, pressure/button/trust properties, a single click, held-button
+movement, and disconnect releasing without activating the pressed control.
+The sequence uses about 4 KB of input payload; it does not send pixels.
+
+These are demonstrated input-fidelity improvements. Their effect on CAPTCHA
+acceptance has not yet been established. The V01–V60 result still does not meet
+the predeclared noninferiority threshold. The user clarified that an established,
+signed-in Mac profile's checkbox-only rate is not the engineering comparator:
+acceptance should hold machine, Chrome, profile and account state constant and
+compare direct with shared interaction.
+
+### Passkey discovery regression from the native engine migration
+
+The optional portal helper still read the old `profile/DevToolsActivePort` file,
+which normal Chrome using a fixed nonzero debugging port does not refresh.
+It now follows the current `browser-host.json`, re-reading it on reconnect,
+while retaining legacy discovery when no managed host file exists. Invalid or
+non-loopback managed endpoints fail rather than selecting a stale browser.
+The installer also updates an active helper in its separate runtime. A disposable
+RP live test verifies current discovery despite a stale old port, a valid signature
+at the original verifier, single-use delivery and cancellation. The installed
+procbox helper successfully reconnected to the unchanged native Chrome process.
+
+The final package passes 35 unit tests. On both procbox and demobox, the live
+mouse suite passes all four checks and the native-host suite passes all six
+continuity/resource checks. Procbox also passes the three portal-passkey live
+checks. The private E/F archive is `environment-followup.tar.gz` under the same
+diagnostic directory as the earlier archive, mode 0600; SHA-256:
+`ac7bdf089811c20ac4ba1ea230637b4365fef869d350bade62369dc51f3149f7`.

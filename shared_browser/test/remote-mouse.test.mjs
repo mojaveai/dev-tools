@@ -7,6 +7,7 @@ test('mouse forwarding preserves order, coordinates and held movement',async()=>
  for(const phase of ['move','down','move','up'])await mouse.dispatch('client',tab,event(phase));
  assert.deepEqual(sent.map(e=>e.type),['mouseMoved','mousePressed','mouseMoved','mouseReleased']);
  assert.deepEqual(sent.map(e=>e.buttons),[0,1,1,0]);assert.ok(sent.every(e=>e.x===12&&e.y===23));
+ assert.deepEqual(sent.map(e=>e.force),[0,0.5,0.5,0]);
  assert.equal(mouse.held.size,0);
 });
 test('disconnect and document changes release held buttons without replaying input',async()=>{
@@ -18,4 +19,13 @@ test('disconnect and document changes release held buttons without replaying inp
  await mouse.dispatch('client',tab,event('move',{generation:'b'}));
  assert.deepEqual(sent.slice(-2).map(e=>[e.type,e.buttons]),[['mouseReleased',0],['mouseMoved',0]]);
  await assert.rejects(mouse.dispatch('client',tab,event('move',{x:NaN})),/Invalid/);
+});
+test('observed pressure is preserved, including zero-pressure automation and fractional devices',async()=>{
+ const sent=[],tab={cdp:{send:async(method,params)=>sent.push(params)}},mouse=new RemoteMouse();
+ for(const pressure of [0,0.5,0.7]){
+   await mouse.dispatch('client',tab,event('down',{pressure}));
+   await mouse.dispatch('client',tab,event('up',{pressure:0}));
+ }
+ assert.deepEqual(sent.map(e=>e.force),[0,0,0.5,0,0.7,0]);
+ await assert.rejects(mouse.dispatch('client',tab,event('down',{pressure:2})),/Invalid/);
 });
