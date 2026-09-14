@@ -2,6 +2,11 @@ export class ViewerTransfers {
   constructor({context, send, error}) {
     Object.assign(this, {context, send, error});
     this.requests = new Set();
+    try { this.dismissed = new Set(JSON.parse(localStorage.getItem('shared-browser-dismissed-downloads') || '[]')); }
+    catch { this.dismissed = new Set(); }
+    this.downloadHistory = document.createElement('details');
+    this.downloadSummary = document.createElement('summary');
+    this.downloadSummary.textContent = 'Downloads';
     this.panel = document.createElement('section');
     this.panel.id = 'transfers';
     this.panel.style.cssText = 'margin:8px 12px;font:14px system-ui;display:grid;gap:8px';
@@ -9,7 +14,9 @@ export class ViewerTransfers {
     this.progress = document.createElement('div');
     this.progress.setAttribute('role', 'status');
     this.downloads = document.createElement('div');
-    this.panel.append(this.chooser, this.progress, this.downloads);
+    this.downloadHistory.append(this.downloadSummary, this.downloads);
+    this.downloadHistory.hidden = true;
+    this.panel.append(this.chooser, this.progress, this.downloadHistory);
     document.getElementById('viewport').before(this.panel);
   }
   pick({node, chooser, multiple = false, accept = ''}) {
@@ -80,12 +87,24 @@ export class ViewerTransfers {
       }
     }
     this.downloads.replaceChildren();
-    for (const item of state.downloads || []) {
+    const visible = (state.downloads || []).filter(item => !this.dismissed.has(item.id));
+    this.downloadHistory.hidden = visible.length === 0;
+    this.downloadSummary.textContent = `Downloads (${visible.length})`;
+    for (const item of visible) {
       const row = document.createElement('div');
       if (item.status === 'completed' && item.url) {
         const link = document.createElement('a'); link.href = item.url; link.download = item.name;
         link.textContent = 'Save '+item.name+' to this device'; row.append(link);
       } else row.textContent = item.name+' · '+(item.error || item.status);
+      const dismiss = document.createElement('button');
+      dismiss.textContent = 'Dismiss';
+      dismiss.setAttribute('aria-label', 'Dismiss '+item.name);
+      dismiss.onclick = () => {
+        this.dismissed.add(item.id);
+        try { localStorage.setItem('shared-browser-dismissed-downloads', JSON.stringify([...this.dismissed].slice(-200))); } catch {}
+        this.update(state);
+      };
+      row.append(' ', dismiss);
       this.downloads.append(row);
     }
   }

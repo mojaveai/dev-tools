@@ -74,7 +74,7 @@ original verifier accepts the signature. It also verifies one-time delivery and
 remote cancellation leaving the site locked. No virtual key was registered in
 Agent Trace. The earlier passkey gate and file-transfer tests remain separate.
 
-The live portal tab is 1d505df7. Trigger Verify passkey, then read
+Find the current portal tab with `cua.getState()`. Trigger Verify passkey, then read
 `http://127.0.0.1:8797/agent/state` on procbox for the human approval URL and matching
 code. Show the URL to the user; the agent must not perform device verification.
 Inspect the dashboard after approval before claiming authentication succeeded.
@@ -101,5 +101,34 @@ does not establish which passkey the user has on their phone.
 
 All 14 unit checks pass. The isolated handoff test now intentionally emits the
 same USB/security-key hints for a registered platform key; phone selection works
-and the original verifier accepts it. The real user's matching credential and
-successful dashboard sign-in still need confirmation.
+and the original verifier accepts it. The real-user result is recorded below.
+
+
+## Real-device result and viewer integration (2026-09-14)
+
+The QA registry contained the existing `Faceid` credential under
+`temporary_platform_uv`; its expiry had passed, so the portal's authentication
+challenge included only the YubiKey. With explicit user approval, the existing
+Faceid expiry alone was extended for 24 hours, to 2026-09-15 05:05 UTC. No new
+credential was registered. The next challenge included both credentials, the
+user approved on their device, and the original portal verifier authenticated
+the remote session. The user confirmed watching navigation through the portal.
+The separate audit-log trusted-signer error remains a portal issue.
+
+The shared viewer now polls its owner-authenticated `/passkey-requests` endpoint
+for pending portal approvals. A card above the shared page opens the same-origin
+portal helper in a separate tab. Return to the viewer after approving. Cards
+clear when delivered, canceled, or expired. This integration currently covers
+Agent Trace QA's same-origin broker; it is not a generic arbitrary-site passkey
+adapter. The helper still performs device verification on the portal origin.
+
+Downloads now live in a collapsed Downloads section. Dismiss hides a record on
+that viewing device across reloads without deleting the remote file or hiding
+it from other viewers. Existing download and upload limits are unchanged.
+
+Validation: 14 unit checks and the isolated real-Chromium viewer quality-of-life
+checks passed (collapsed downloads, dismissal across reload, request appearance
+and removal, expiry, and rejection of unexpected approval origins). The deployed
+endpoint rejects requests without the owner identity (403). Shared Chrome was
+restarted for deployment; the portal's authenticated session survived. Reload
+the viewer to load the updated client bundle.

@@ -1,3 +1,4 @@
+import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
 import { AgentPointer } from "./agent-pointer.js";
 import { ScrollSync } from "./scroll-sync.mjs";
@@ -14,6 +15,7 @@ let ws,
   scale = 1,
   connected = false;
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
+const passkeys = new ViewerPasskeys();
 const caches = new Map();
 const agentPointer=new AgentPointer(document.getElementById("viewport"));
 let retries = 0;

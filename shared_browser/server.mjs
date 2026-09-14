@@ -424,6 +424,13 @@ const httpServer = http.createServer(async (req, res) => {
       res.on('close', () => stream.destroy());
       return stream.pipe(res);
     }
+    if (url.pathname === '/passkey-requests') {
+      try {
+        const response = await fetch('http://127.0.0.1:8797/agent/state', {signal:AbortSignal.timeout(1000)});
+        if (!response.ok) throw Error('Passkey broker unavailable');
+        return json(res, await response.json());
+      } catch { return json(res, []); }
+    }
     if (url.pathname === "/status") return json(res, await session.state());
     if (url.pathname === "/asset") {
       const resource = session.tabs
