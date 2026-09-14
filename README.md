@@ -83,6 +83,12 @@ The installer keeps other tmux settings and keybindings intact. To apply just
 this configuration on an existing host, run `./provision.sh --only mod_tmux`.
 Set `DEVTOOLS_TMUX_CONFIG` if you use a custom tmux configuration path.
 
+Mouse scrolling uses tmux's normal copy-mode bindings: scroll up to browse
+history, then scroll to the bottom or press `q` to return to the application.
+The installer keeps other tmux settings and keybindings intact. To apply just
+this configuration on an existing host, run `./provision.sh --only mod_tmux`.
+Set `DEVTOOLS_TMUX_CONFIG` if you use a custom tmux configuration path.
+
 ## How trust flows
 
 ```
