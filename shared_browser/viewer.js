@@ -7,6 +7,7 @@ import { ViewerPasskeys } from "./viewer-passkeys.js";
 import { ViewerTransfers } from "./viewer-transfers.js";
 import { AgentPointer } from "./agent-pointer.js";
 import { ScrollSync } from "./scroll-sync.mjs";
+import { ForeignObjectTransforms } from "./foreign-object.js";
 import { Replayer } from "@rrweb/replay";
 import "@rrweb/replay/dist/style.css";
 
@@ -25,6 +26,8 @@ const transfers = new ViewerTransfers({context:()=>({tab:active,generation,clien
 const passkeys = new ViewerPasskeys();
 const caches = new Map();
 const agentPointer=new AgentPointer(document.getElementById("viewport"));
+const webkit=/AppleWebKit/.test(navigator.userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
+let foreignObjects, foreignObjectsDirty=true;
 let retries = 0;
 function error(message) {
   $("error").textContent = message;
@@ -137,6 +140,10 @@ function scheduleLayout() {
 function wireFrame() {
   const doc = replayer?.iframe.contentDocument;
   if (!doc?.documentElement) return;
+  if(webkit) {
+    if(foreignObjects?.doc!==doc){foreignObjects=new ForeignObjectTransforms(doc);foreignObjectsDirty=true;}
+    if(foreignObjectsDirty){foreignObjects.refresh();foreignObjectsDirty=false;}
+  }
   if (!overlay || !overlay.isConnected) {
     overlay = document.createElement("div");
     overlay.id = "interaction-layer";
@@ -200,19 +207,31 @@ function wireFrame() {
   overlay.style.transform = `scale(${scale})`;
   const seen = new Set();
   const occlusion=controlOcclusion(doc);
+  const visibilityCache=new WeakMap(), plans=[], restore=[];
   try {
-  for (const source of doc.querySelectorAll("input,textarea,select,button,a[href]")) {
+  // Current receivers accept pointer coordinates for links/buttons directly.
+  // Form inputs keep browser-native controls for Safari's keyboard, touch
+  // targeting and file picker. Avoid measuring hundreds of invisible copies
+  // of links and chart labels on every scroll frame.
+  const candidates=mouseSupported ? 'input,textarea,select' : 'input,textarea,select,button,a[href]';
+  for (const source of doc.querySelectorAll(candidates)) {
     if (source.type === "hidden") continue;
-    const visible=controlVisibility(source);
+    const visible=controlVisibility(source,visibilityCache);
     if (!visible || !occlusion.visible(source,visible)) {
       // The replay itself must paint the field behind its modal/popover.
       const original=sourceOpacity.get(source);
-      if(original){source.style.setProperty('opacity',original.value,original.priority);sourceOpacity.delete(source);}
+      if(original)restore.push({source,original});
       continue;
     }
-    const {rect,clip}=visible;
-    source.setAttribute("aria-hidden", "true");
-    source.tabIndex=-1;
+    plans.push({source,...visible});
+  }
+  } finally {occlusion.dispose();}
+  // Finish all replay geometry reads before any DOM/style writes. Alternating
+  // them forces a new layout for each link or form field on the page.
+  for(const {source,original} of restore){source.style.setProperty('opacity',original.value,original.priority);sourceOpacity.delete(source);}
+  for(const {source,rect,clip,css} of plans) {
+    if(source.getAttribute('aria-hidden')!=='true')source.setAttribute("aria-hidden", "true");
+    if(source.tabIndex!==-1)source.tabIndex=-1;
     const id=replayer.getMirror().getId(source);
     seen.add(id);
     const fileInput=source.type === "file";
@@ -222,7 +241,7 @@ function wireFrame() {
     // copy too produces visible ghosts when scroll positions briefly differ.
     if (!clickable) {
       if(!sourceOpacity.has(source))sourceOpacity.set(source,{value:source.style.getPropertyValue('opacity'),priority:source.style.getPropertyPriority('opacity')});
-      source.style.opacity="0";
+      if(source.style.opacity!=="0")source.style.opacity="0";
     }
     let field=controls.get(id);
     if (!field) {
@@ -243,7 +262,6 @@ function wireFrame() {
       });
       controls.set(id,field); overlay.append(field);
     }
-    const css=doc.defaultView.getComputedStyle(source);
     // Cache style/options signatures: assigning unchanged styles and rebuilding
     // a native select on every mouse/scroll event disrupts mobile interaction.
     const styleNames=["font","color","background-color","border-top","border-right","border-bottom","border-left","border-radius",
@@ -280,7 +298,6 @@ function wireFrame() {
       field.style.cursor = 'pointer';
     } else if (document.activeElement!==field) field.value=source.value;
   }
-  } finally {occlusion.dispose();}
   for (const [id,field] of controls) if (!seen.has(id)) {field.remove();controls.delete(id);}
   agentPointer.refresh();
   reveal();
@@ -324,21 +341,29 @@ function showTab(id) {
     },
   );
   replayer.on("fullsnapshot-rebuilded", () => {
+    foreignObjects=null;foreignObjectsDirty=true;
     fit();
     scheduleLayout();
   });
-  replayer.on("resize", () => {fit();scheduleLayout();});
+  replayer.on("resize", () => {foreignObjectsDirty=true;foreignObjects?.refresh(true);fit();scheduleLayout();});
   replayer.iframe.addEventListener("load", scheduleLayout);
   // rrweb defaults to smooth scrolling. The controls and page must instead
   // move together in one frame. This adapter is for the pinned rrweb 2.1.4 API.
-  const applyScroll=replayer.applyScroll.bind(replayer);
   replayer.applyScroll=(data) => {
     if (scrollSync.pending.has(data.id)) return;
     const echo=scrollEchoes.get(data.id);
     if(echo && performance.now()<echo.until) return;
-    scrollEchoes.delete(data.id);applyScroll(data,true);
+    scrollEchoes.delete(data.id);
+    const node=replayer.getMirror().getNode(data.id);
+    const target=node?.nodeType===9 ? node.defaultView : node;
+    // rrweb's "sync" path uses behavior:auto, which still obeys a site's
+    // scroll-behavior:smooth. Incoming positions must not start animations
+    // that fight later scroll frames or local gestures.
+    target?.scrollTo?.({left:data.x,top:data.y,behavior:'instant'});
   };
   replayer.on("event-cast", event => {
+    if(event.type===2 || (event.type===3 && [0,8,13].includes(event.data.source)))foreignObjectsDirty=true;
+    if(event.type===3 && [8,13].includes(event.data.source))foreignObjects?.refresh(true);
     if (event.type===3 && event.data.source===5) {
       const field=controls.get(event.data.id);
       if (field && field.tagName!=="BUTTON" && document.activeElement!==field && !pendingFills.has(event.data.id)) {
@@ -367,6 +392,11 @@ function eventReceived(message) {
     caches.set(message.tab, cache);
   }
   if (message.event.type === 2) {
+    if(message.tab===active && generation!==message.generation) {
+      agentPointer.reset();scrollSync.clear();scrollEchoes.clear();
+      clearTimeout(scrollTimer);scrollTimer=null;pendingScroll=null;
+      cancelAnimationFrame(momentumFrame);
+    }
     cache.events = cache.events.filter((e) => e.type === 4).slice(-1);
     cache.generation = message.generation;
   }

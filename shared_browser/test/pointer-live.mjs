@@ -16,6 +16,7 @@ try {
  await page.evaluate(()=>{rect=null;done('a');pointer.refresh();});
  assert.deepEqual(await page.evaluate(()=>pointer.position),{x:240,y:170});
  assert.equal(await page.$eval('.agent-cursor',e=>getComputedStyle(e).opacity),'1');
+ assert.equal(await page.$eval('.agent-target',e=>e.hidden),true);
  console.log('PASS: removed click target retains visible cursor at click point');
  await page.evaluate(()=>{rect={x:600,y:400,width:80,height:40};pointer.refresh();});
  assert.deepEqual(await page.evaluate(()=>pointer.position),{x:240,y:170});
@@ -35,4 +36,11 @@ try {
  await page.evaluate(()=>done('d'));
  assert.equal(await page.$eval('.agent-ripple',e=>e.style.left),'160px');
  console.log('PASS: moving target and click ripple agree on final coordinates');
+ await page.waitForFunction(()=>pointer.target.hidden);
+ assert.equal(await page.$eval('.agent-cursor',e=>getComputedStyle(e).opacity),'1');
+ console.log('PASS: completed outline expires while the cursor remains visible');
+ await page.evaluate(()=>{start('e');pointer.reset();done('e');});
+ assert.equal(await page.$eval('.agent-feedback',e=>e.classList.contains('visible')),false);
+ assert.equal(await page.$eval('.agent-target',e=>e.hidden),true);
+ console.log('PASS: document reset cannot be revived by a late completion');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

@@ -18,7 +18,9 @@ function start() {
     recordCanvas: false,
     recordCrossOriginIframes: true,
     maskInputOptions: { password: true },
-    sampling: { mousemove: 50, scroll: 100 },
+    // Preserve source scroll frames; 100 ms sampling made agent scrolling
+    // visibly step at 10 Hz even on a fast connection.
+    sampling: { mousemove: 50, scroll: 16 },
   });
   window.__sharedSnapshot = () => record.takeFullSnapshot();
 }

@@ -5,7 +5,9 @@ export function controlOcclusion(doc) {
   // Replay disables iframe input. Restore iframe hit-testing only while
   // measuring so dialogs inside those frames can occlude background fields.
   style.textContent='iframe { pointer-events: auto !important; }';
-  doc.documentElement.append(style);
+  // Pages without embedded frames need no temporary stylesheet. Inserting
+  // and removing one otherwise invalidates style during every scroll frame.
+  if(doc.querySelector('iframe'))doc.documentElement.append(style);
   const transparent=new Map();
   const invisible=element=>{
     if(transparent.has(element))return transparent.get(element);

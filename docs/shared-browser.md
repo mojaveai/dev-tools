@@ -343,3 +343,45 @@ both worsened late in the block. This **does not establish the requested
 reliability or distributional equivalence**. Earlier one-off successes above
 should not be presented as acceptance evidence. Full ordered counts and limitations
 are saved with the investigation.
+
+### Safari chart rendering and scroll responsiveness (September 14)
+
+Artificial Analysis exposed a cross-engine replay issue: its Chrome page uses
+CSS transforms inside SVG `foreignObject`, while its direct Safari page emits
+SVG transforms. WebKit reports correct DOM rectangles for Chrome's markup but
+paints the labels together at the SVG origin. The viewer now normalizes single
+chains of static 2D HTML transforms to equivalent SVG matrices on WebKit.
+Original text/link nodes and recorder IDs remain intact. Complex branching,
+animated, and already-rotated SVG layouts are intentionally left unchanged.
+Full snapshots, incremental content/style changes, fonts, and resize are handled.
+
+Scrolling no longer measures invisible copies of every anchor and button.
+Those targets use the existing coordinate input layer; native form inputs retain
+their overlays, including checkboxes for accurate touch targeting. Visibility
+checks reject off-screen controls early, share ancestor measurements, and batch
+geometry reads before writes. Source scroll recording samples at 16 ms instead
+of 100 ms, and replay applies positions instantly even on pages with CSS smooth
+scrolling. Old page highlights clear on document replacement; completed outlines
+expire after 600 ms and disappear when their target moves or is removed.
+
+In an isolated Artificial Analysis comparison on the Mac (1,710 × 998 viewport,
+30 local wheel steps), median synchronous handler time fell from 19.2 to 1.3 ms
+in Chrome and from 30 to 1 ms in WebKit. Updated median frame intervals were
+16.2 and 17 ms. These are local diagnostic measurements, not a guarantee across
+devices/networks. Screenshots verified the repaired WebKit label paint, and
+label geometry matched the source Chrome page.
+
+Regression commands, after `npm run build`, with `SHARED_BROWSER_CHROME` set:
+
+```sh
+npm test
+node test/foreign-object-live.mjs
+node test/scroll-live.mjs
+node test/pointer-live.mjs
+node test/navigation-live.mjs
+node test/iframe-live.mjs
+```
+
+The live suites create isolated profiles and synthetic pages. They cover label
+geometry/mutations, local and source scrolling, mouse/touch form controls,
+typing, navigation highlights, iframe occlusion, images, and reconnects.

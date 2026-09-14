@@ -13,9 +13,10 @@ export class AgentPointer {
     this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
   reset() {
-    clearTimeout(this.timer);cancelAnimationFrame(this.frame);
+    clearTimeout(this.timer);clearTimeout(this.targetTimer);cancelAnimationFrame(this.frame);
     this.rippleMotion?.cancel();this.pressMotion?.cancel();
     this.id=null;this.event=null;this.pending=null;this.moving=false;
+    this.target.hidden=true;this.destination=null;
     this.layer.classList.remove('visible');
   }
   locate(event,resolve) {
@@ -36,7 +37,14 @@ export class AgentPointer {
     this.cursor.style.transform=`translate(${point.x}px,${point.y}px)`;
   }
   refresh() {
-    if(!this.event || this.pending || this.layer.dataset.phase!=='start')return;
+    if(!this.event)return;
+    if(this.pending || this.layer.dataset.phase!=='start') {
+      // Completed cursor stays at the click point, but its outline cannot
+      // remain attached to an element that has moved or disappeared.
+      const r=this.resolve(this.event.node);
+      if(!r || !r.width || !r.height || Math.abs(r.x-parseFloat(this.target.style.left))>.5 || Math.abs(r.y-parseFloat(this.target.style.top))>.5)this.target.hidden=true;
+      return;
+    }
     this.destination=this.locate(this.event,this.resolve);
     if(!this.moving)this.paint(this.destination);
   }
@@ -52,10 +60,11 @@ export class AgentPointer {
       this.pressMotion=this.cursor.querySelector('svg').animate([{transform:'scale(1)'},{transform:'scale(.82)'},{transform:'scale(1)'}],{duration:this.reduced?0:220});
     }
     this.timer=setTimeout(()=>this.layer.classList.remove('visible'),10000);
+    this.targetTimer=setTimeout(()=>{this.target.hidden=true;},600);
   }
   handle(event,resolve) {
     if(event.phase==='start') {
-      clearTimeout(this.timer);cancelAnimationFrame(this.frame);
+      clearTimeout(this.timer);clearTimeout(this.targetTimer);cancelAnimationFrame(this.frame);
       this.rippleMotion?.cancel();this.pressMotion?.cancel();
       this.id=event.id;this.event=event;this.resolve=resolve;this.pending=null;
       this.destination=null;

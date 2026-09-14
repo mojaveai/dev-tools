@@ -53,6 +53,7 @@ try {
  await act('#push');await wait(()=>rendered('Push route done'),'pushState route without viewer refresh');
  console.log('PASS: pushState navigation renders without refresh');
  await act('#full');await wait(()=>rendered('Full navigation done'),'redirect and new document without viewer refresh');
+ assert.equal(await page.$eval('.agent-feedback',e=>e.classList.contains('visible')),false,'Navigation must clear the previous document highlight');
  console.log('PASS: full navigation and redirect render without refresh');
  const border=await page.$eval('#controls input[aria-label="Test code"]',e=>{
   const s=getComputedStyle(e);return [s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth,s.outlineWidth];
