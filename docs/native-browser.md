@@ -199,3 +199,15 @@ closed. `unavailable` means both runtimes reported no connected browser.
 Timestamped JSON events in the Mac supervisor log identify tunnel generations,
 connection establishment and reconnects. Router disconnect events distinguish
 idle losses from browser actions with uncertain outcomes.
+
+### Published endpoint watchdog
+
+Each two-second tunnel heartbeat now verifies the owner marker, generation
+socket, and stable symlink before acknowledging health. If the symlink was
+deleted, it is recreated atomically without restarting browsers or existing
+connections. A missing generation fails the heartbeat session so the Mac
+supervisor reconnects. Conflicting files and changed ownership are preserved.
+Repairs emit a timestamped `endpoint_repaired` event in the Mac relay error log.
+This closes a gap where SSH stayed healthy indefinitely after the stable path
+was removed. It does not identify the process that removed a path; that requires
+filesystem auditing enabled before the event.

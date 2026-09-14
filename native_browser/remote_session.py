@@ -7,6 +7,29 @@ import socket
 import stat
 import subprocess
 import sys
+import time
+
+
+def maintain_endpoint(cfg, endpoint, generation):
+    """A heartbeat is healthy only while its published route remains usable."""
+    if Path(str(endpoint) + '.owner').read_text() != cfg['owner']:
+        raise RuntimeError('Remote relay ownership changed')
+    if not stat.S_ISSOCK(generation.lstat().st_mode):
+        raise RuntimeError('Forwarded listener disappeared; reconnect required')
+    if endpoint.is_symlink():
+        # A newer SSH generation may have taken over. Never steal it back.
+        return os.readlink(endpoint) == generation.name
+    if os.path.lexists(endpoint):
+        raise RuntimeError('Published endpoint replaced by a non-symlink')
+    try:
+        # symlink creation is atomic and refuses a concurrent replacement.
+        endpoint.symlink_to(generation.name)
+    except FileExistsError:
+        return endpoint.is_symlink() and os.readlink(endpoint) == generation.name
+    print(json.dumps({'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                      'event': 'endpoint_repaired', 'generation': generation.name}),
+          file=sys.stderr, flush=True)
+    return True
 
 
 def publish(cfg):
@@ -41,6 +64,8 @@ def run(cfg):
             # a published listener indefinitely after a tailnet change.
             ready, _, _ = select.select([sys.stdin], [], [], 75)
             if not ready or not os.read(sys.stdin.fileno(), 1):
+                break
+            if not maintain_endpoint(cfg, endpoint, generation):
                 break
             os.write(sys.stdout.fileno(), b'.')
     finally:

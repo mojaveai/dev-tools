@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -12,8 +13,50 @@ from unittest.mock import Mock, patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'native_browser'))
 from session_router import SessionRouter
+from remote_session import maintain_endpoint, run
 
 class RecoveryTests(unittest.TestCase):
+    def test_heartbeat_repairs_deleted_endpoint_before_ack(self):
+        with tempfile.TemporaryDirectory(prefix='nb-', dir='/tmp') as directory:
+            endpoint=Path(directory)/'browser.sock'; generation=Path(directory)/'gen.sock'
+            Path(str(endpoint)+'.owner').write_text('mine')
+            cfg={'remote_socket':str(endpoint),'generation':str(generation),'owner':'mine','repair_root_socket':False}
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(generation));listener.listen()
+                def acknowledge(*args):
+                    self.assertEqual(generation.name,os.readlink(endpoint))
+                    return 1
+                with patch('remote_session.select.select',side_effect=[([Mock()],[],[]),([],[],[])]), patch('remote_session.os.read',side_effect=lambda *a: (endpoint.unlink(),b'.')[1]), patch('remote_session.os.write',side_effect=acknowledge) as ack:
+                    run(cfg)
+                ack.assert_called_once()
+
+    def test_endpoint_watchdog_preserves_replacements_and_detects_lost_listener(self):
+        with tempfile.TemporaryDirectory(prefix='nb-', dir='/tmp') as directory:
+            endpoint=Path(directory)/'browser.sock'; generation=Path(directory)/'gen.sock'
+            owner=Path(str(endpoint)+'.owner');owner.write_text('mine')
+            cfg={'owner':'mine'}
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(generation))
+                endpoint.symlink_to('newer.sock')
+                self.assertFalse(maintain_endpoint(cfg,endpoint,generation))
+                self.assertEqual('newer.sock',os.readlink(endpoint))
+                endpoint.unlink();endpoint.write_text('preserve')
+                with self.assertRaises(RuntimeError):maintain_endpoint(cfg,endpoint,generation)
+                self.assertEqual('preserve',endpoint.read_text())
+                endpoint.unlink();owner.write_text('another owner')
+                with self.assertRaises(RuntimeError):maintain_endpoint(cfg,endpoint,generation)
+                self.assertFalse(endpoint.exists())
+                owner.write_text('mine');generation.unlink()
+                with self.assertRaises(FileNotFoundError):maintain_endpoint(cfg,endpoint,generation)
+
+    def test_missing_endpoint_explains_transport_recovery(self):
+        output=[];router=SessionRouter('/missing',Mock(),output.append)
+        router.health=Mock(return_value={'route':None,'mac':{'reason':'relay_socket_missing'},'local':{'reason':'no_connected_browser'}})
+        router.client({'id':1,'method':'tools/call','params':{'name':'js'}})
+        text=output[-1]['result']['content'][0]['text']
+        self.assertIn('inspect the relay logs',text)
+        self.assertNotIn('Keep ChatGPT desktop and Chrome open',text)
+
     def test_transient_discovery_recovers_without_local_fallback(self):
         router=SessionRouter('/missing',Mock(),Mock())
         with patch('session_router.mac_health',side_effect=[{'ready':False,'reason':'discovery_timeout'},{'ready':True,'reason':'browser_connected'}]) as probe, patch('session_router.local_health') as local, patch('session_router.time.sleep'):

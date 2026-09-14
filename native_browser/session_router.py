@@ -153,8 +153,9 @@ class SessionRouter:
                 health = self.health()
                 route = health['route']
                 if route is None:
+                    guidance = ('The Mac relay endpoint is missing or unreachable; its supervisor should repair/reconnect automatically. If this persists, inspect the relay logs; restarting Chrome or ChatGPT does not repair a missing socket. ' if health['mac']['reason'] in ('relay_socket_missing', 'relay_unreachable') else 'Keep ChatGPT desktop and Chrome open on the browser host. ')
                     self.error(message, 'Browser discovery did not establish a usable connection after bounded retries. A timeout does not mean Chrome is closed. Mac: ' + health['mac']['reason'] +
-                        '; local: ' + health['local']['reason'] + '. Keep ChatGPT desktop and Chrome open on the browser host. The relay will rediscover browsers on the next js call; no Codex restart is needed. No JavaScript was executed.'); return
+                        '; local: ' + health['local']['reason'] + '. ' + guidance + 'The relay will rediscover browsers on the next js call; no Codex restart is needed. No JavaScript was executed.'); return
                 if self.backend is None or self.backend.route != route:
                     try: self.connect(route, restore=True)
                     except (OSError, ValueError, RuntimeError):

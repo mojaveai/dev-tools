@@ -66,3 +66,10 @@ blocked. After a stream loss, reset and recreate JavaScript bindings. An idle
 loss has no pending action; an in-flight action may have completed and must not
 be replayed. Never silently substitute a local browser when the user requested
 the Mac browser.
+
+For `relay_socket_missing` or `relay_unreachable`, the failure is the relay
+endpoint/transport, not evidence that Chrome or ChatGPT is closed. Do not ask
+the user to restart those apps for this error. Retry discovery after a short
+delay; the supervisor repairs a deleted endpoint on its next heartbeat. If it
+persists, inspect the Mac LaunchAgent logs and the remote endpoint/owner before
+restarting the relay. `js_reset` clears runtime state; it cannot repair a socket.
