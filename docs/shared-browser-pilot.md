@@ -247,3 +247,13 @@ Chrome confirms the phone page displays Create demo passkey. Next: user enrolls
 from their iPhone at https://procbox.agent-trace.ts.net:8443/passkey/, reports ready,
 then the agent requests sign-in and the user approves a matching code with their
 passkey. The project report is server-protected until verified approval.
+
+## Human passkey approval succeeded (2026-09-14)
+
+After the user enrolled and reported ready, the agent requested sign-in through
+MCP in tab 82100b9a. The remote page remained signed out while request FD3D18FC
+was pending. After the user's approval, the page showed Signed in as Demo Owner
+and Passkey approval verified. The agent then clicked Open project report and
+read the protected synthetic report: 3 tasks complete, 1 task ready for review.
+The server verified the enrolled passkey; the exact device verification method
+(Face ID versus a permitted fallback) is not observable by the agent.

@@ -28,3 +28,5 @@ await writeFile("dist/viewer.html", html);
 await copyFile("fixture.html", "dist/fixture.html");
 await build({entryPoints:['passkey-phone.js'],bundle:true,minify:true,format:'iife',outfile:'dist/passkey-phone.js'});
 for (const name of ['passkey-phone.html','passkey-site.html','passkey-site.js']) await copyFile(name, 'dist/'+name);
+await build({entryPoints:['portal-passkey-client.js'],bundle:true,minify:true,format:'iife',outfile:'dist/portal-passkey-client.js'});
+await copyFile('portal-passkey.html','dist/portal-passkey.html');
