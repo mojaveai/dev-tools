@@ -9,151 +9,47 @@
     <title>Shared browser</title>
     <link rel="stylesheet" href="/viewer.css" />
     <style>
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        background: #e9edf1;
-        color: #172333;
-        font:
-          14px system-ui,
-          -apple-system,
-          sans-serif;
-      }
-      header {
-        background: #13273b;
-        color: white;
-        padding: 12px 16px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-      header strong {
-        font-size: 17px;
-      }
-      #connection {
-        margin-right: auto;
-        color: #adc8df;
-      }
-      button,
-      input,
-      select {
-        font: inherit;
-        border: 1px solid #bac5cf;
-        border-radius: 7px;
-        padding: 9px 12px;
-      }
-      button {
-        background: white;
-        cursor: pointer;
-      }
-      button:disabled {
-        opacity: 0.45;
-        cursor: default;
-      }
-      #take {
-        background: #d3f5dc;
-      }
-      nav {
-        padding: 9px 12px;
-        background: #fff;
-        display: flex;
-        gap: 8px;
-        border-bottom: 1px solid #ccd5dd;
-      }
-      #url {
-        flex: 1;
-        min-width: 70px;
-      }
-      #tabs {
-        max-width: 220px;
-      }
-      #notice {
-        padding: 9px 14px;
-        background: #f8fafc;
-        min-height: 36px;
-      }
-      #viewport {
-        position: relative;
-        margin: 12px auto;
-        overflow: hidden;
-        background: white;
-        box-shadow: 0 2px 15px #17233320;
-      }
-      #replay {
-        transform-origin: top left;
-      }
-      .replayer-wrapper {
-        position: relative;
-      }
-      .replayer-mouse,
-      .replayer-mouse-tail {
-        pointer-events: none;
-      }
-      #input {
-        display: none;
-        position: fixed;
-        bottom: 10px;
-        left: 5%;
-        width: 90%;
-        z-index: 20;
-        padding: 12px;
-        background: white;
-        box-shadow: 0 1px 18px #0004;
-      }
-      #input input {
-        width: 75%;
-      }
-      #error {
-        color: #ab152b;
-      }
-      #dialog {
-        display: none;
-        padding: 12px;
-        background: #fff0cf;
-      }
-      #dialog input {
-        max-width: 35%;
-      }
-      @media (max-width: 650px) {
-        header {
-          padding: 9px;
-          font-size: 12px;
-        }
-        header strong {
-          font-size: 14px;
-        }
-        button,
-        input,
-        select {
-          padding: 8px;
-        }
-        #tabs {
-          max-width: 110px;
-        }
-        #viewport {
-          margin: 4px auto;
-        }
-      }
+      *{box-sizing:border-box}
+      body{margin:0;background:white;color:#243244;font:14px system-ui,-apple-system,sans-serif}
+      button,input,select{font:inherit;border:1px solid #d5dde5;border-radius:8px;padding:8px 10px}
+      button{background:#fff;cursor:pointer}button:disabled{opacity:.45;cursor:default}
+      #viewer-handle{position:fixed;z-index:30;top:0;left:50%;transform:translateX(-50%);width:58px;height:16px;padding:0;border:1px solid #c8d2dc;border-top:0;border-radius:0 0 10px 10px;background:#fffffff0;box-shadow:0 1px 5px #14283c18;display:flex;align-items:center;justify-content:center;gap:6px}
+      #viewer-handle .grip{width:21px;height:3px;background:#8b98a5;border-radius:3px}
+      #viewer-handle .dot{width:5px;height:5px;border-radius:50%;background:#d99a24}
+      #viewer-handle[data-connected=true] .dot{background:#27956b}
+      #viewer-handle:focus-visible{outline:2px solid #287dbe;outline-offset:2px}
+      #viewer-toolbar{position:fixed;z-index:29;top:22px;left:50%;transform:translateX(-50%);width:min(940px,calc(100% - 20px));max-height:calc(100dvh - 40px);overflow:auto;padding:10px;border:1px solid #d8e0e8;border-radius:14px;background:#fffffffa;box-shadow:0 8px 32px #14283c24}
+      #viewer-toolbar[hidden]{display:none}
+      .toolbar-heading{display:flex;align-items:center;gap:10px;margin:0 2px 8px;font-size:12px}
+      .toolbar-heading strong{font-size:13px}#connection{color:#64748b;margin-right:auto}
+      #viewer-close{border:0;background:transparent;padding:2px 7px;font-size:19px;line-height:1}
+      nav{display:flex;gap:6px;align-items:center}#url{flex:1;min-width:70px;background:#f6f8fa}#tabs{max-width:190px;min-width:80px}
+      #agent-note{margin:10px 2px 0;font-size:12px;color:#526174}#agent-note summary{cursor:pointer}#notice{margin:7px 0 0;line-height:1.5}
+      #toolbar-downloads{margin-top:8px}#toolbar-downloads:empty{display:none}
+      #viewer-requests{position:fixed;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:25;width:min(420px,calc(100% - 24px));max-height:45dvh;overflow:auto;pointer-events:none}
+      #viewer-requests section:empty{display:none}#viewer-requests section{pointer-events:auto}
+      #viewer-requests #transfers:has(>div:not(:empty)){padding:12px;background:#fffffff5;border:1px solid #d8e0e8;border-radius:12px;box-shadow:0 4px 20px #14283c20}
+      #error:empty{display:none}#error{position:fixed;bottom:12px;left:12px;z-index:26;background:#fff1f1;border:1px solid #f1baba;border-radius:10px;color:#a82828;padding:10px;max-width:min(450px,90vw)}
+      #dialog{display:none;position:fixed;z-index:40;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px;background:white;border:1px solid #d5dde5;border-radius:12px;box-shadow:0 10px 45px #0003;max-width:95vw}#dialog input{max-width:100%;margin:10px 0}
+      #viewport{position:relative;margin:0 auto;overflow:hidden;background:white}
+      #replay{transform-origin:top left}.replayer-wrapper{position:relative}
+      .replayer-mouse,.replayer-mouse-tail{pointer-events:none}
+      #input{display:none;position:fixed;bottom:10px;left:5%;width:90%;z-index:40;padding:12px;background:white;box-shadow:0 1px 18px #0004}#input input{width:75%}
+      @media(max-width:650px){nav{flex-wrap:wrap}#tabs{flex:1;max-width:none}#url{order:4;flex-basis:calc(100% - 50px)}#go{order:5}#viewer-handle{width:66px;height:20px}#viewer-toolbar{top:26px}}
     </style>
   </head>
   <body>
-    <header>
-      <strong>Shared browser</strong><span id="connection">Connecting…</span
-      ><button id="take" hidden>Take control</button
-      ><button id="give" hidden disabled>Return to agent</button>
-    </header>
-    <nav>
-      <button id="back" title="Back">←</button
-      ><select id="tabs" aria-label="Tab"></select
-      ><input id="url" aria-label="Address" /><button id="go">Go</button
-      ><button id="new">+</button>
-    </nav>
-    <div id="notice">
-      One remote Chrome session · DOM sharing · no video stream
-    </div>
+    <button id="viewer-handle" aria-label="Shared browser controls" aria-expanded="false" aria-controls="viewer-toolbar" title="Shared browser controls"><span class="dot"></span><span class="grip"></span></button>
+    <section id="viewer-toolbar" aria-label="Shared browser controls" hidden>
+      <div class="toolbar-heading"><strong>Shared browser</strong><span id="connection">Connecting…</span><button id="viewer-close" aria-label="Close browser controls">×</button></div>
+      <button id="take" hidden>Take control</button><button id="give" hidden disabled>Return to agent</button>
+      <nav aria-label="Browser navigation">
+        <button id="back" title="Back" aria-label="Back">←</button><select id="tabs" aria-label="Tab"></select><input id="url" aria-label="Address" /><button id="go">Go</button><button id="new" aria-label="New tab">+</button>
+      </nav>
+      <details id="agent-note" hidden><summary>Agent message</summary><p id="notice"></p></details>
+      <div id="toolbar-downloads"></div>
+    </section>
+    <div id="viewer-requests" aria-label="Browser requests"></div>
     <div id="error" role="status"></div>
     <div id="dialog">
       <span></span> <input aria-label="Dialog response" /><button

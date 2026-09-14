@@ -5,7 +5,8 @@ export class ViewerPasskeys {
     this.panel.id = 'passkey-requests';
     this.panel.setAttribute('aria-live', 'polite');
     this.panel.style.cssText = 'margin:8px 12px;display:grid;gap:8px';
-    document.getElementById('viewport').before(this.panel);
+    const requests=document.getElementById('viewer-requests');
+    if(requests)requests.append(this.panel);else document.getElementById('viewport').before(this.panel);
     this.signature = '';
     this.poll();
     this.timer = setInterval(() => this.poll(), 1500);

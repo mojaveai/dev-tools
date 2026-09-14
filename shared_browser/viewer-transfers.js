@@ -16,8 +16,10 @@ export class ViewerTransfers {
     this.downloads = document.createElement('div');
     this.downloadHistory.append(this.downloadSummary, this.downloads);
     this.downloadHistory.hidden = true;
-    this.panel.append(this.chooser, this.progress, this.downloadHistory);
-    document.getElementById('viewport').before(this.panel);
+    this.panel.append(this.chooser, this.progress);
+    (document.getElementById("toolbar-downloads") || this.panel).append(this.downloadHistory);
+    const requests=document.getElementById('viewer-requests');
+    if(requests)requests.append(this.panel);else document.getElementById('viewport').before(this.panel);
   }
   pick({node, chooser, multiple = false, accept = ''}) {
     const target = {...this.context(), node, chooser};

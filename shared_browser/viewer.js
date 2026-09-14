@@ -1,3 +1,4 @@
+import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
 import { controlVisibility } from "./control-visibility.js";
 import { ViewerPasskeys } from "./viewer-passkeys.js";
@@ -16,6 +17,7 @@ let ws,
   replayer,
   scale = 1,
   connected = false;
+const shell = new ViewerShell();
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const passkeys = new ViewerPasskeys();
 const caches = new Map();
@@ -99,8 +101,8 @@ function own() {
 }
 function dimensions() {
   return {
-    width: Math.max(320,Math.min(2560,Math.floor(window.innerWidth - 12))),
-    height: Math.max(400, window.innerHeight - 150),
+    width: Math.max(320,Math.min(2560,Math.floor(window.innerWidth))),
+    height: Math.max(400, window.innerHeight),
   };
 }
 function fit() {
@@ -108,7 +110,7 @@ function fit() {
   const iframe = replayer.iframe;
   const width = Number(iframe.width) || 1280,
     height = Number(iframe.height) || 800;
-  scale = Math.min(1, (innerWidth - 12) / width);
+  scale = Math.min(1, innerWidth / width);
   $("replay").style.transform = `scale(${scale})`;
   $("viewport").style.width = width * scale + "px";
   $("viewport").style.height = height * scale + "px";
@@ -358,9 +360,9 @@ function update(next) {
 
   for (const id of ["go", "new", "back", "url"]) $(id).disabled = !connected;
   $("connection").textContent = connected
-    ? "Connected · procbox"
+    ? "Connected"
     : "Reconnecting…";
-  $("notice").textContent = next.message || "Live · You and the agent can both interact";
+  shell.update({connected,message:next.message});
   const tabs = $("tabs");
   tabs.replaceChildren(
     ...next.tabs.map((t) => {
@@ -429,7 +431,7 @@ function connect() {
     }
   };
   ws.onclose = () => {
-    connected = false;agentPointer.reset();transfers.disconnect();
+    connected = false;shell.update({connected,message:state?.message});agentPointer.reset();transfers.disconnect();
     clearTimeout(fillTimer);fillTimer=null;pendingFills.clear();
     clearTimeout(scrollTimer);scrollTimer=null;pendingScroll=null;
     cancelAnimationFrame(momentumFrame);scrollSync.clear();

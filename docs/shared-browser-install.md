@@ -167,3 +167,18 @@ spinner, hash/history/redirect, asymmetric border and new-tab sizing checks.
 Remaining engine observations from Outlook: AX/DOM observations currently cap
 at 150 elements, combined key shortcuts are not parsed, and rich-text human
 editing needs its own acceptance pass. These are distinct from the visual fixes.
+
+## Edge controls / full-page viewer (2026-09-14)
+
+The permanent title, URL and agent-message bars have been replaced by a small
+handle at the top center. Hover reveals the floating toolbar; click/tap pins it
+open. Escape, the close button, or a click outside closes it. The toolbar contains
+tabs/address/navigation, Downloads and a collapsed Agent message. It does not
+participate in page layout. The website now starts at y=0 and uses the available
+window width and height instead of reserving 150 pixels for viewer chrome.
+
+Passkey requests and active file transfers float separately near the bottom-right;
+dialogs remain accessible. Desktop and 390px phone tests verify opening/closing
+controls causes no page-area loss, alongside existing navigation, spinner, border
+and sizing checks. Desktop/mobile designs were visually inspected. Refresh the
+viewer to activate; no browser or Codex restart is required.

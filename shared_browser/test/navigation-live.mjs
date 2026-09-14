@@ -28,6 +28,16 @@ try {
  await page.goto(origin);
  const rendered=label=>page.$eval('#replay iframe',(e,label)=>e.contentDocument?.body?.textContent.includes(label),label);
  await wait(()=>rendered('Initial page'),'initial viewer snapshot');
+ const footprint=()=>page.$eval('#viewport',e=>({top:e.getBoundingClientRect().top,width:e.getBoundingClientRect().width}));
+ assert.deepEqual(await footprint(),{top:0,width:800});
+ assert.equal(await page.$eval('#viewer-toolbar',e=>e.hidden),true);
+ await page.click('#viewer-handle');
+ assert.equal(await page.$eval('#viewer-toolbar',e=>e.hidden),false);
+ assert.deepEqual(await footprint(),{top:0,width:800});
+ await page.keyboard.press('Escape');
+ assert.equal(await page.$eval('#viewer-toolbar',e=>e.hidden),true);
+ console.log('PASS: floating controls do not consume page space or resize the website');
+
  const act=async selector=>{const r=await rpc('js',{context:'navigation-test',code:`await tab.click(${JSON.stringify(selector)});nodeRepl.write('clicked');`});assert.ok(!r.isError,JSON.stringify(r));};
  const spinner=()=>page.$eval('#replay iframe',e=>{
   const d=e.contentDocument,s=d.defaultView.getComputedStyle(d.querySelector('.spinner'));
@@ -53,8 +63,17 @@ try {
  console.log('PASS: native overlay preserves asymmetric borders and outline');
  await rpc('js',{context:'navigation-test',code:"const next=await browser.tabs.new('http://127.0.0.1:8802/');nodeRepl.write('new tab');"});
  await wait(()=>rendered('Initial page'),'new tab rendered');
- await wait(()=>page.$eval('#replay iframe',(e,width)=>Number(e.width)===width,788),'new tab fits connected viewer');
+ await wait(()=>page.$eval('#replay iframe',(e,width)=>Number(e.width)===width,800),'new tab fits connected viewer');
  console.log('PASS: new agent tab adopts connected viewer width without reconnect');
+ await page.setViewport({width:390,height:700});
+ await wait(()=>page.$eval('#replay iframe',e=>Number(e.width)===390),'phone width');
+ await page.click('#viewer-handle');
+ assert.equal(await page.$eval('#viewer-toolbar',e=>e.hidden),false);
+ assert.deepEqual(await footprint(),{top:0,width:390});
+ await page.click('#viewer-close');
+ assert.equal(await page.$eval('#viewer-toolbar',e=>e.hidden),true);
+ console.log('PASS: phone-sized controls open and close without reducing page area');
+
 
 }finally{
  if(browser)await browser.close();
