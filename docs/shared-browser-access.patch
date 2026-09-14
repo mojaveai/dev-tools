@@ -1,0 +1,36 @@
+diff --git a/deploy/gitops/tailscale-policy.hujson b/deploy/gitops/tailscale-policy.hujson
+--- a/deploy/gitops/tailscale-policy.hujson
++++ b/deploy/gitops/tailscale-policy.hujson
+@@ -31,6 +31,12 @@
+ 
+ 	"grants": [
+ 		{
++			// Owner-only DOM shared browser pilot on procbox.
++			"src": ["manbir@asgroup.ai"],
++			"dst": ["tag:procbox"],
++			"ip":  ["tcp:8443"],
++		},
++		{
+ 			// Private GL-X3000 management for the operator and diagnostic host.
+ 			"src": ["group:agent-trace-operators", "100.89.85.103"],
+ 			"dst": ["100.96.204.78"],
+@@ -242,6 +248,19 @@
+ 
+ 	"tests": [
+ 		{
++			// Service hosts must not inherit the owner-only browser grant.
++			"src":   "cryptopi-02",
++			"proto": "tcp",
++			"deny":  ["procbox:8443"],
++		},
++		{
++			// Keep the shared browser reachable without opening neighboring ports.
++			"src":    "manbir@asgroup.ai",
++			"proto":  "tcp",
++			"accept": ["procbox:8443"],
++			"deny":   ["procbox:8442", "procbox:8444"],
++		},
++		{
+ 			// QA browser access must not expose dependency adapters or SSH tunnels.
+ 			"src": "manbir@asgroup.ai",
+ 			"proto": "tcp",

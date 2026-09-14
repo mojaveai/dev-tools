@@ -1,0 +1,28 @@
+import { build } from "esbuild";
+import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+await mkdir("dist", { recursive: true });
+await build({
+  entryPoints: ["recorder.js"],
+  bundle: true,
+  minify: true,
+  format: "iife",
+  outfile: "dist/recorder.js",
+});
+await build({
+  entryPoints: ["viewer.js"],
+  bundle: true,
+  minify: true,
+  format: "iife",
+  outfile: "dist/viewer.js",
+});
+let html = await readFile("viewer.html", "utf8");
+for (const name of ["viewer.js", "viewer.css"]) {
+  const hash = createHash("sha256")
+    .update(await readFile("dist/" + name))
+    .digest("hex")
+    .slice(0, 16);
+  html = html.replace("/" + name, "/" + name + "?v=" + hash);
+}
+await writeFile("dist/viewer.html", html);
+await copyFile("fixture.html", "dist/fixture.html");

@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shared browser test bench</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f6f8fb;
+        color: #183146;
+        font: 16px system-ui;
+      }
+      main {
+        max-width: 1000px;
+        margin: auto;
+        padding: 40px 28px;
+      }
+      small {
+        color: #5f7283;
+        letter-spacing: 0.12em;
+      }
+      h1 {
+        font-size: 42px;
+        margin: 12px 0;
+      }
+      p {
+        line-height: 1.6;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
+      }
+      .card {
+        background: white;
+        border: 1px solid #d6e0e9;
+        border-radius: 16px;
+        padding: 25px;
+      }
+      label {
+        display: block;
+        margin: 16px 0;
+      }
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+        border: 1px solid #b6c8d7;
+        padding: 12px;
+        border-radius: 8px;
+        max-width: 100%;
+      }
+      input,
+      textarea {
+        width: 100%;
+        margin-top: 7px;
+      }
+      button {
+        background: #176c54;
+        color: white;
+        cursor: pointer;
+      }
+      output {
+        display: block;
+        background: #ecf6f0;
+        padding: 15px;
+        margin-top: 18px;
+        border-radius: 8px;
+        min-height: 52px;
+      }
+      #layout:after {
+        content: "Desktop layout";
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 24px 16px;
+        }
+        h1 {
+          font-size: 29px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        #layout:after {
+          content: "Phone layout";
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <small>PROCBOX / LIVE TEST BENCH</small>
+      <h1>One browser. Both of us.</h1>
+      <p>
+        Changes here happen in remote Chrome. You and the agent can both edit this page at any time.
+      </p>
+      <p id="layout"></p>
+      <div class="grid">
+        <section class="card">
+          <h2>Shared form</h2>
+          <label
+            >Your message<input
+              id="message"
+              placeholder="Write something for the agent" /></label
+          ><label
+            >Color<select id="color">
+              <option>Forest</option>
+              <option>Ocean</option>
+              <option>Sunset</option>
+            </select></label
+          ><label
+            ><input id="check" type="checkbox" style="width: auto" /> Ready for
+            the next step</label
+          ><button id="save">Save message</button
+          ><output id="result">Waiting for a message.</output>
+        </section>
+        <section class="card">
+          <h2>Shared counter</h2>
+          <p>Clicks made by either controller appear for everyone.</p>
+          <button id="increment">Add one</button><output id="count">0</output
+          ><label>Notes<textarea id="notes" rows="3"></textarea></label
+          ><button id="prompt">Open dialog</button>
+          <p>
+            <a href="/fixture?second=1" target="_blank"
+              >Open another test tab</a
+            >
+          </p>
+        </section>
+      </div>
+      <section class="card" style="margin-top: 24px">
+        <h2>Session activity</h2>
+        <p id="activity">The browser is ready.</p>
+        <p>
+          This is an isolated test page. No real account or transaction is
+          involved.
+        </p>
+      </section>
+    </main>
+    <script>
+      let count = 0;
+      document.querySelector("#increment").onclick = () => {
+        document.querySelector("#count").textContent = ++count;
+        activity.textContent =
+          "Counter changed at " + new Date().toLocaleTimeString();
+      };
+      document.querySelector("#save").onclick = () => {
+        result.textContent =
+          document.querySelector("#message").value +
+          " · " +
+          document.querySelector("#color").value;
+        activity.textContent =
+          "Message saved at " + new Date().toLocaleTimeString();
+      };
+      document.querySelector("#prompt").onclick = () => {
+        const reply = prompt("A dialog from remote Chrome", "Hello");
+        activity.textContent =
+          reply === null ? "Dialog canceled" : "Dialog reply: " + reply;
+      };
+    </script>
+  </body>
+</html>

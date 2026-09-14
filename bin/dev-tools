@@ -17,6 +17,13 @@ if len(sys.argv) > 1 and sys.argv[1] == "native-browser":
         main()
     else:
         sys.exit("Usage: dev-tools native-browser {check|mcp|install-mac} [options]")
+elif len(sys.argv) > 1 and sys.argv[1] == "shared-browser":
+    import shutil
+    node = shutil.which("node")
+    if not node:
+        sys.exit("Node.js is required for shared-browser")
+    entry = "mcp.mjs" if sys.argv[2:3] == ["mcp"] else "cli.mjs"
+    os.execv(node, [node, str(repo / "shared_browser" / entry), *sys.argv[2:]])
 elif len(sys.argv) > 1 and sys.argv[1] == "browser":
     sys.path.insert(0, str(repo / "browser"))
     from manager import main

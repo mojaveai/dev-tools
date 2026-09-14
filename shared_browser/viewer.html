@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Shared browser · procbox</title>
+    <link rel="stylesheet" href="/viewer.css" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #e9edf1;
+        color: #172333;
+        font:
+          14px system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      header {
+        background: #13273b;
+        color: white;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      header strong {
+        font-size: 17px;
+      }
+      #connection {
+        margin-right: auto;
+        color: #adc8df;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        border: 1px solid #bac5cf;
+        border-radius: 7px;
+        padding: 9px 12px;
+      }
+      button {
+        background: white;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      #take {
+        background: #d3f5dc;
+      }
+      nav {
+        padding: 9px 12px;
+        background: #fff;
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid #ccd5dd;
+      }
+      #url {
+        flex: 1;
+        min-width: 70px;
+      }
+      #tabs {
+        max-width: 220px;
+      }
+      #notice {
+        padding: 9px 14px;
+        background: #f8fafc;
+        min-height: 36px;
+      }
+      #viewport {
+        position: relative;
+        margin: 12px auto;
+        overflow: hidden;
+        background: white;
+        box-shadow: 0 2px 15px #17233320;
+      }
+      #replay {
+        transform-origin: top left;
+      }
+      .replayer-wrapper {
+        position: relative;
+      }
+      .replayer-mouse,
+      .replayer-mouse-tail {
+        pointer-events: none;
+      }
+      #input {
+        display: none;
+        position: fixed;
+        bottom: 10px;
+        left: 5%;
+        width: 90%;
+        z-index: 20;
+        padding: 12px;
+        background: white;
+        box-shadow: 0 1px 18px #0004;
+      }
+      #input input {
+        width: 75%;
+      }
+      #error {
+        color: #ab152b;
+      }
+      #dialog {
+        display: none;
+        padding: 12px;
+        background: #fff0cf;
+      }
+      #dialog input {
+        max-width: 35%;
+      }
+      @media (max-width: 650px) {
+        header {
+          padding: 9px;
+          font-size: 12px;
+        }
+        header strong {
+          font-size: 14px;
+        }
+        button,
+        input,
+        select {
+          padding: 8px;
+        }
+        #tabs {
+          max-width: 110px;
+        }
+        #viewport {
+          margin: 4px auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Shared browser</strong><span id="connection">Connecting…</span
+      ><button id="take" hidden>Take control</button
+      ><button id="give" hidden disabled>Return to agent</button>
+    </header>
+    <nav>
+      <button id="back" title="Back">←</button
+      ><select id="tabs" aria-label="Tab"></select
+      ><input id="url" aria-label="Address" /><button id="go">Go</button
+      ><button id="new">+</button>
+    </nav>
+    <div id="notice">
+      One remote Chrome session · DOM sharing · no video stream
+    </div>
+    <div id="error" role="status"></div>
+    <div id="dialog">
+      <span></span> <input aria-label="Dialog response" /><button
+        id="dialog-ok"
+      >
+        OK</button
+      ><button id="dialog-cancel">Cancel</button>
+    </div>
+    <main id="viewport"><div id="replay"></div></main>
+    <div id="input">
+      <label>Edit field <input aria-label="Edit remote field" /></label
+      ><button id="input-done">Done</button>
+    </div>
+    <script src="/viewer.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+.agent-feedback{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .2s;transform-origin:top left;overflow:visible}
+.agent-feedback.visible{opacity:1}
+.agent-cursor{position:absolute;left:0;top:0;display:flex;align-items:flex-start;filter:drop-shadow(0 1px 2px #0003);transform-origin:2px 2px;will-change:transform}
+.agent-label{margin:22px 0 0 -7px;background:#fff;color:#343438;padding:3px 7px;border:1px solid #dedee3;border-radius:6px;font:500 10px/1.3 system-ui;white-space:nowrap}
+.agent-cursor svg{margin:-2px 0 0 -2px}
+.agent-target{position:absolute;box-sizing:border-box;border:1.5px solid #8b5cf6;border-radius:8px;box-shadow:0 0 0 2px #a78bfa20;background:#8b5cf608;transition:opacity .15s}
+.agent-feedback[data-phase=done] .agent-target{opacity:.35}
+.agent-feedback[data-phase=failed] .agent-target{border-color:#dc2626}
+.agent-feedback[data-kind=typing][data-phase=start] .agent-target{animation:agent-edit-pulse .8s ease-in-out infinite alternate}
+.agent-ripple{position:absolute;width:28px;height:28px;border:1.5px solid #8b5cf6;background:#a78bfa35;border-radius:50%;opacity:0}
+@keyframes agent-edit-pulse{to{box-shadow:0 0 0 7px #a78bfa15}}
+.replayer-mouse,.replayer-mouse-tail{display:none!important}
+@media(prefers-reduced-motion:reduce){.agent-feedback,.agent-target{transition:none}.agent-target{animation:none!important}}
