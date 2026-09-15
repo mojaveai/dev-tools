@@ -111,5 +111,9 @@ restriction. The owner confirmed mobile pairing succeeded. The Yubico demo subse
 the iPhone extension: remote Chrome displayed “Authentication successful!” and
 the relay logged delivery for both operations. This used the popup fallback,
 which required returning manually. The viewer had filtered out Yubico requests;
-the allowlist now includes the demo, with a regression test. Same-tab return on
-the physical iPhone still needs confirmation.
+the allowlist now includes the demo, with a regression test. After refreshing the deployed viewer, the owner confirmed the approval button
+appeared and the full Face ID flow stayed in one tab with automatic return.
+Remote Chrome showed “Authentication successful!” and the relay confirmed delivery
+for request `3a42524f`. This verifies the iPhone same-tab sign-in flow end to end.
+The current test deployment remains scoped to Yubico; restoring cryptoagent
+requires matching relay/build configuration and a credential available on the phone.
