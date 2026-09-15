@@ -117,7 +117,11 @@ It does not establish that a second physical device can reach the Tailscale URL.
 feedback, viewport sizing before clicks, late old-tab input, foreground popups,
 two-way form edits, manual tab selection, viewer disconnect/reconnect, and receiver
 restart with unsaved edits. Set `SHARED_BROWSER_WEBKIT_MODULE` to an installed
-Playwright module to exercise WebKit as the second viewer.
+Playwright module to exercise WebKit as the second viewer. It asserts actual
+viewport visibility while switching between different origins and screen sizes,
+and checks that stale-input notices clear automatically. Tab sizing requests a
+fresh source snapshot even when Chrome already has the requested dimensions;
+otherwise old replay metadata can leave the selected page permanently hidden.
 
 Visual QA can use `test/qa-proxy.mjs` with a temporary loopback-only SSH forward.
 That helper injects the owner identity solely for local testing. It must never be

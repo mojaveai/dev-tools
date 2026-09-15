@@ -23,6 +23,7 @@ const fixture=http.createServer((req,res)=>{
 });
 await new Promise(r=>fixture.listen(0,'127.0.0.1',r));
 const fixtureURL='http://127.0.0.1:'+fixture.address().port;
+const otherOrigin='http://localhost:'+fixture.address().port;
 const source=await puppeteer.launch({executablePath:process.env.SHARED_BROWSER_CHROME,headless:true});
 let worker,viewer,webkitViewer,ws,logs='';
 const client=new Client({name:'tab-follow-test',version:'1.0.0'});
@@ -47,12 +48,12 @@ try {
   await client.connect(new StdioClientTransport({command:process.execPath,
     args:[new URL('../mcp.mjs',import.meta.url).pathname],env:{...process.env}}));
   await act('await cua.getState();');
-  await act(`var browser=await cua.getBrowser();var a=await browser.tabs.new('${fixtureURL}/a');var b=await browser.tabs.new('${fixtureURL}/b');`);
+  await act(`var browser=await cua.getBrowser();var a=await browser.tabs.new('${fixtureURL}/a');var b=await browser.tabs.new('${otherOrigin}/b');`);
   const initial=await rpc('state');
   const a=initial.tabs.find(t=>t.url===fixtureURL+'/a').id;
-  const b=initial.tabs.find(t=>t.url===fixtureURL+'/b').id;
+  const b=initial.tabs.find(t=>t.url===otherOrigin+'/b').id;
   const sourceA=(await source.pages()).find(p=>p.url()===fixtureURL+'/a');
-  const sourceB=(await source.pages()).find(p=>p.url()===fixtureURL+'/b');
+  const sourceB=(await source.pages()).find(p=>p.url()===otherOrigin+'/b');
   viewer=await puppeteer.launch({executablePath:process.env.SHARED_BROWSER_CHROME,headless:true});
   const pages=[await viewer.newPage()];
   if(process.env.SHARED_BROWSER_WEBKIT_MODULE) {
@@ -62,11 +63,21 @@ try {
   for(const page of pages){
     if(page.setViewport)await page.setViewport({width:940,height:700});
     else await page.setViewportSize({width:940,height:700});
-    await page.setExtraHTTPHeaders(headers);await page.goto(origin);
+    await page.setExtraHTTPHeaders(headers);
+    const captureSocket=()=>{const Native=window.WebSocket;window.WebSocket=class extends Native{constructor(...args){super(...args);window.testViewerSocket=this;}};};
+    if(page.evaluateOnNewDocument)await page.evaluateOnNewDocument(captureSocket);
+    else await page.addInitScript(captureSocket);
+    await page.goto(origin);
   }
   const showing=(page,id,text)=>page.evaluate(({id,text})=>document.querySelector('#tabs')?.value===id &&
+    getComputedStyle(document.querySelector('#viewport')).visibility==='visible' &&
     document.querySelector('#replay iframe')?.contentDocument?.body?.textContent.includes(text),{id,text});
-  const both=async(id,text)=>{for(const page of pages){await page.bringToFront();await wait(()=>showing(page,id,text),'both viewers show '+text);}};
+  const both=async(id,text)=>{
+    for(const page of pages){
+      await page.bringToFront();
+      await wait(()=>showing(page,id,text),'both viewers visibly show '+text);
+    }
+  };
   await both(b,'Follow /b');
   const events=[];
   ws=new WebSocket(origin.replace('http','ws')+'/ws',{headers:{...headers,Origin:origin}});
@@ -94,6 +105,7 @@ try {
   assert.equal(await sourceA.evaluate(()=>document.visibilityState),'visible');
   assert.equal(await sourceB.evaluate(()=>innerWidth),940);
   assert.match(events.find(e=>e.requestId==='stale-click').message,/Tab changed/);
+  assert.equal(events.find(e=>e.requestId==='stale-click').code,'STALE_VIEW');
   console.log('PASS: late old-tab resize, hover, and click cannot switch back or act on a stale view');
 
   await act("await b.type('input','Agent changed B');");
@@ -103,6 +115,17 @@ try {
   await pages[0].type('#interaction-layer input',' plus viewer');
   await wait(()=>sourceB.$eval('input',e=>e.value==='Agent changed B plus viewer'),'viewer input reaches newly selected source');
   console.log('PASS: switching back by a field edit preserves two-way user interaction');
+  await pages[0].evaluate(tab=>window.testViewerSocket.send(JSON.stringify({
+    type:'click',tab,generation:'old-document',x:10,y:10,requestId:'old-document-click'
+  })),b);
+  await wait(()=>pages[0].$eval('#error',e=>e.textContent==='Page changed. Please try that action again.'),'transient stale-view notice');
+  await wait(()=>pages[0].$eval('#error',e=>e.textContent===''),'stale-view notice clears automatically');
+  assert.equal(await sourceB.$eval('#count',e=>e.textContent),'Click','rejected click was not replayed');
+  console.log('PASS: stale document input is rejected and its retry notice clears without a refresh');
+  // Different viewer sizes must not strand a phone behind a desktop-sized replay.
+  if(pages[1].setViewport)await pages[1].setViewport({width:390,height:780});
+  else await pages[1].setViewportSize({width:390,height:780});
+
 
   await act("await a.click('#popup');");
   await wait(async()=>(await rpc('state')).tabs.some(t=>t.url===fixtureURL+'/popup'),'popup attached');
@@ -129,7 +152,7 @@ try {
 
   await stop();await start();
   const afterRestart=await rpc('state');
-  assert.equal(afterRestart.tabs.find(t=>t.id===afterRestart.activeTab)?.url,fixtureURL+'/b');
+  assert.equal(afterRestart.tabs.find(t=>t.id===afterRestart.activeTab)?.url,otherOrigin+'/b');
   await reconnected.reload();
   await wait(()=>reconnected.$eval('#interaction-layer input',e=>e.value==='While disconnected'),'receiver restart preserves current form');
   console.log('PASS: receiver-only restart preserves Chrome tab selection and unsaved edits');

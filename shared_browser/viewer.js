@@ -29,7 +29,10 @@ const agentPointer=new AgentPointer(document.getElementById("viewport"));
 const webkit=/AppleWebKit/.test(navigator.userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
 let foreignObjects, foreignObjectsDirty=true;
 let retries = 0;
-function error(message) {
+let noticeTimer;
+function error(message, transient=false) {
+  clearTimeout(noticeTimer);
+  $("error").classList.toggle("notice", transient);
   $("error").textContent = message;
 }
 const pendingFills = new Map();
@@ -45,7 +48,7 @@ function flushFills() {
 }
 const scrollSync=new ScrollSync();
 const scrollEchoes=new Map();
-let pendingScroll, scrollTimer, momentumFrame, ready=false;
+let pendingScroll, scrollTimer, momentumFrame, ready=false, awaitingSnapshot=false;
 function flushScroll() {
   clearTimeout(scrollTimer);scrollTimer=null;
   if (pendingScroll) { const next=pendingScroll;pendingScroll=null;send(next); }
@@ -82,7 +85,9 @@ function localScroll(target,dx,dy) {
   if (!scrollTimer) scrollTimer=setTimeout(flushScroll,50);
 }
 function reveal() {
-  if (ready && Number(replayer?.iframe.width)===lastWidth && replayer?.iframe.contentDocument?.body && overlay) {
+  // A shared source can be sized by another viewer; wait for its fresh snapshot,
+  // not an exact match to this device's requested width. fit() scales the result.
+  if (ready && !awaitingSnapshot && Number(replayer?.iframe.width)>0 && replayer?.iframe.contentDocument?.body && overlay) {
     $("viewport").style.visibility="visible";
   }
 }
@@ -317,6 +322,7 @@ function showTab(id) {
   if(changed && connected && id) {
     const size=dimensions();lastWidth=size.width;
     $("viewport").style.visibility="hidden";
+    awaitingSnapshot=true;
     // New agent tabs otherwise retain Chrome's launch viewport until the
     // next viewer resize/reconnect. Request sizing once per tab switch.
     send({type:'resize',...size});
@@ -382,6 +388,7 @@ function showTab(id) {
   }, 100);
 }
 function eventReceived(message) {
+  if (message.tab===active && message.event.type===2) awaitingSnapshot=false;
   // Remote focus echoes must never steal the iPhone keyboard from its native
   // parent input. Focus belongs to the viewer; field values still synchronize.
   if (message.event.type===3 && message.event.data.source===2 &&
@@ -478,7 +485,14 @@ function connect() {
       // here stranded the viewer on a blank page until reconnect.
       // For real document changes, the next full snapshot replaces the cache;
       // server generation checks reject any stale input in the meantime.
-      if (m.type === "error") error(m.message);
+      if (m.type === "error") {
+        if (m.code === "STALE_VIEW" || /^(Page|Tab) changed; wait for the updated view$/.test(m.message)) {
+          // The rejected input is never replayed against a different document.
+          // Navigation races need a brief retry notice, not a permanent error.
+          error("Page changed. Please try that action again.", true);
+          noticeTimer=setTimeout(() => error(""), 4000);
+        } else error(m.message);
+      }
       if (m.type === "dialog") {
         $("dialog").style.display = "block";
         $("dialog").querySelector("span").textContent = m.message;

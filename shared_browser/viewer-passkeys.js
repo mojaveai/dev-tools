@@ -36,8 +36,15 @@ export class ViewerPasskeys {
       text.textContent = 'Passkey requested · Agent Trace QA · '+request.code;
       const link = document.createElement('a');
       link.textContent = 'Approve with passkey';
+      url.searchParams.set('auto','1');
       link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
       link.style.cssText = 'padding:9px 12px;border-radius:7px;background:#155eaa;color:white;text-decoration:none';
+      link.addEventListener('click', event => {
+        // Keep the RP's top-level origin: its verifier rejects iframe assertions.
+        // noopener prevents the approval page from controlling the viewer.
+        event.preventDefault();
+        window.open(link.href, '_blank', 'noopener,noreferrer,popup,width=480,height=640');
+      });
       row.append(text, link);
       this.panel.append(row);
     }

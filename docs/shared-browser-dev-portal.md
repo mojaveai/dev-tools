@@ -123,8 +123,10 @@ The separate audit-log trusted-signer error remains a portal issue.
 
 The shared viewer now polls its owner-authenticated `/passkey-requests` endpoint
 for pending portal approvals. A card above the shared page opens the same-origin
-portal helper in a separate tab. Return to the viewer after approving. Cards
-clear when delivered, canceled, or expired. This integration currently covers
+portal helper in a compact approval window with no opener access. It attempts the
+passkey prompt immediately and closes after delivering the response. If the browser
+requires another tap or the prompt is dismissed, the approval button remains
+available. Mobile browsers may show this window as a tab. Cards clear when delivered, canceled, or expired. This integration currently covers
 Agent Trace QA's same-origin broker; it is not a generic arbitrary-site passkey
 adapter. The helper still performs device verification on the portal origin.
 
@@ -138,3 +140,14 @@ and removal, expiry, and rejection of unexpected approval origins). The deployed
 endpoint rejects requests without the owner identity (403). Shared Chrome was
 restarted for deployment; the portal's authenticated session survived. Reload
 the viewer to load the updated client bundle.
+
+### Why approval still uses a separate top-level window
+
+The existing portal verifier rejects WebAuthn assertions with `crossOrigin: true`.
+Embedding the helper inside the viewer (8443) would produce that flag because the
+portal uses a different origin (23581). Inline approval therefore needs an explicit
+portal verifier change; this adapter preserves its origin and verification rules.
+The automatic-close behavior only confirms delivery, not successful portal login.
+`test/portal-passkey-live.mjs` covers normal approval, automatic prompting/closing,
+a simulated gesture rejection followed by retry, request reuse, and cancellation
+using a disposable authenticator and an actual signature verifier.

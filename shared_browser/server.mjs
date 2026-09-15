@@ -644,7 +644,7 @@ wss.on("connection", (ws, req) => {
             if(message.type==='pointer')await remoteMouse.release(ws);
             return;
           }
-          throw Error('Tab changed; wait for the updated view');
+          throw Object.assign(Error('Tab changed; wait for the updated view'), {code:'STALE_VIEW'});
         }
         if (message.type === "goto") {
           await session.navigate(t, message.url);
@@ -660,6 +660,10 @@ wss.on("connection", (ws, req) => {
             width: Math.max(320, Math.min(2560, Math.round(message.width))),
             height: Math.max(400, Math.min(1600, Math.round(message.height))),
           });
+          // A cached tab may start with metadata from its launch viewport.
+          // setViewport emits nothing when Chrome is already the requested size.
+          // Send current metadata and DOM so every viewer can finish revealing it.
+          await t.page.evaluate(() => window.__sharedSnapshot?.());
           return;
         }
         if (message.type === "dialog") {
@@ -669,7 +673,7 @@ wss.on("connection", (ws, req) => {
         if (message.type==='pointer' && message.phase==='cancel') {await remoteMouse.release(ws);return;}
         if (message.generation !== t.generation) {
           await remoteMouse.release(ws);
-          throw Error("Page changed; wait for the updated view");
+          throw Object.assign(Error("Page changed; wait for the updated view"), {code:"STALE_VIEW"});
         }
         // Layout and hover are passive: a popup can become foreground while
         // its recorder is still attaching, before session.active is updated.
@@ -768,6 +772,7 @@ wss.on("connection", (ws, req) => {
       send(ws, {
         type: "error",
         requestId: message?.requestId,
+        code: err.code === "STALE_VIEW" ? err.code : undefined,
         message: err.message,
       });
     }
