@@ -543,11 +543,13 @@ const httpServer = http.createServer(async (req, res) => {
       return stream.pipe(res);
     }
     if (url.pathname === '/passkey-requests') {
-      try {
-        const response = await fetch('http://127.0.0.1:8797/agent/state', {signal:AbortSignal.timeout(1000)});
-        if (!response.ok) throw Error('Passkey broker unavailable');
-        return json(res, await response.json());
-      } catch { return json(res, []); }
+      const feeds=['http://127.0.0.1:8797/agent/state','http://localhost:8811/agent/state'];
+      const lists=await Promise.all(feeds.map(async endpoint=>{try{
+        const response=await fetch(endpoint,{signal:AbortSignal.timeout(1000)});
+        if(!response.ok)throw Error('Passkey broker unavailable');
+        const result=await response.json();return Array.isArray(result)?result:[];
+      }catch{return [];}}));
+      return json(res,lists.flat());
     }
     if (url.pathname === "/status") return json(res, await session.state());
     if (url.pathname === "/asset") {

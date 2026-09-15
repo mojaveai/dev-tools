@@ -28,6 +28,13 @@ export class ViewerPasskeys {
     this.signature = signature;
     this.panel.replaceChildren();
     for (const request of current) {
+      if(request.type==='extension'){
+        if(request.origin!=='https://cryptoagent-1-1.agent-trace.ts.net:3581')continue;
+        const row=document.createElement('div');
+        row.style.cssText='padding:12px;border:1px solid #a4c9e9;border-radius:10px;background:#eef7ff;color:#17202a';
+        row.textContent='Passkey requested · '+new URL(request.origin).hostname+' · '+request.code+'. Open Dev Tools Auth in your Mac Safari toolbar to approve with your YubiKey.';
+        this.panel.append(row);continue;
+      }
       const url = new URL(request.url);
       if (url.origin !== 'https://procbox.agent-trace.ts.net:23581' || url.pathname !== '/_shared-browser-passkey/') continue;
       const row = document.createElement('div');

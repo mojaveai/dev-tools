@@ -9,3 +9,13 @@ test('rejects challenge, origin, operation and frame substitution',()=>{for(cons
 test('rejects wrong credential and unknown request',()=>{const {relay,r}=setup();assert.throws(()=>relay.complete(r.id,{...response(),id:'other'}),/Unexpected credential/);assert.throws(()=>relay.complete('other',response()),/expired/);relay.cancel(r.id);});
 test('cancellation and expiry cannot deliver',async()=>{for(const expired of [false,true]){const {relay,r,expire}=setup();if(expired)expire();else relay.cancel(r.id);assert.throws(()=>relay.complete(r.id,response()),/expired/);relay.cancel(r.id);await assert.rejects(r.promise,/canceled/);}});
 test('new request cancels old and RP is exact',async()=>{const {relay,r}=setup();assert.throws(()=>relay.start('get',{rpId:'example.com',challenge:'x'}),/relying party/);const next=relay.start('create',{rp:{id:'localhost'},challenge:'next'});next.promise.catch(()=>{});await assert.rejects(r.promise,/canceled/);assert.throws(()=>relay.complete(r.id,response()),/expired/);relay.cancel(next.id);});
+test('companion keeps simultaneous browser requests independent',async()=>{
+ const relay=new AuthRelay({origin,maxPending:2});
+ const one=relay.start('get',{rpId:'localhost',challenge:'one'});
+ const two=relay.start('get',{rpId:'localhost',challenge:'two'});two.promise.catch(()=>{});
+ assert.equal(relay.list().length,2);
+ assert.throws(()=>relay.start('get',{rpId:'localhost',challenge:'three'}),/Too many/);
+ assert.throws(()=>relay.complete(two.id,response()),/does not match/);
+ relay.complete(one.id,response());await one.promise;
+ assert.equal(relay.list().length,1);relay.cancel(two.id);await assert.rejects(two.promise);
+});

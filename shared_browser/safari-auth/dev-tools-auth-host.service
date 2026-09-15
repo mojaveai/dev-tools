@@ -1,0 +1,15 @@
+[Unit]
+Description=Load the optional Safari authentication companion into shared Chrome
+After=dev-tools-shared-chrome-primary.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/state/dev-tools/safari-auth-test
+Environment=AUTH_BROWSER_STATE=%h/.local/state/dev-tools/shared-browser-primary/browser-host.json
+ExecStart=/usr/local/bin/node %h/.local/state/dev-tools/safari-auth-test/load-host.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

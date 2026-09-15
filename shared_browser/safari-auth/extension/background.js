@@ -22,7 +22,7 @@ api.runtime.onMessage.addListener(async (message, sender) => {
     if (message.type === 'open' && fromPopup) {
       const request = (await relay('/pending')).find(r => r.id === message.id);
       if (!request) throw Error('Request expired');
-      if (request.origin !== AUTH_CONFIG.site) throw Error('This test is restricted to its disposable site');
+      if (request.origin !== AUTH_CONFIG.site) throw Error('This site is not enabled for the paired browser');
       const prior = (await api.storage.local.get('binding')).binding;
       if (prior) await api.tabs.remove(prior.tabId).catch(() => {});
       // Create inactive first. Content-script readiness is retried until bound.

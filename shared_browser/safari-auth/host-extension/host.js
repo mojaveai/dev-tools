@@ -1,7 +1,7 @@
 importScripts('config.js');
 const active=new Map();
 async function relay(path,body){
-  const r=await fetch(AUTH_HOST.relay+'/host'+path,{method:'POST',headers:{Authorization:'Bearer '+AUTH_HOST.token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await fetch(AUTH_HOST.relay+'/host'+path,{method:'POST',signal:AbortSignal.timeout(5000),headers:{Authorization:'Bearer '+AUTH_HOST.token,'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await r.json();if(!r.ok)throw Error(data.error||'Relay failed');return data;
 }
 async function handle(kind,request){
@@ -22,6 +22,7 @@ async function handle(kind,request){
       await new Promise(resolve=>setTimeout(resolve,700));
     }
   }catch(error){
+    if(state.id)await relay('/cancel',{id:state.id}).catch(()=>{});
     if(!state.canceled){const method=kind==='create'?'completeCreateRequest':'completeGetRequest';await chrome.webAuthenticationProxy[method]({requestId:request.requestId,error:{name:'NotAllowedError',message:error.message}}).catch(()=>{});}
   }finally{active.delete(request.requestId);}
 }

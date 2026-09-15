@@ -1,5 +1,10 @@
 # Safari authentication companion: Mac pilot
 
+**Update:** the user subsequently enabled the extension path specifically for the
+new cryptoagent dashboard. See [dashboard setup and rollback](DASHBOARD-SETUP.md).
+The broader arbitrary-site/iPhone work remains a prototype. Historical parking
+and test notes below describe the preceding milestone.
+
 ## Parked development prototype
 
 **Decision (2026-09-15): keep this as a development prototype and resume only

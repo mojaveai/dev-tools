@@ -13,7 +13,7 @@
   host.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#eef2f6;display:grid;place-items:center';
   const root = host.attachShadow({mode:'closed'});
   root.innerHTML='<style>article{font:16px system-ui;background:white;color:#17202a;border-radius:18px;padding:32px;max-width:460px;box-shadow:0 10px 45px #0002}h1{font-size:24px}button{padding:12px 18px;margin-right:8px;cursor:pointer}p{overflow-wrap:anywhere}</style><article><h1></h1><p id="site"></p><p id="status">This approves the request in the separate test browser. Your passkey stays with your credential provider.</p><button id="approve">Continue with passkey</button><button id="cancel">Cancel</button></article>';
-  root.querySelector('h1').textContent=request.kind==='create'?'Create a test passkey':'Approve test sign-in';
+  root.querySelector('h1').textContent=request.kind==='create'?'Create a passkey for the remote browser':'Approve remote sign-in';
   root.querySelector('#site').textContent=request.origin+' · Request '+request.id.slice(0,8);
   document.documentElement.append(host);
   const status=root.querySelector('#status'), approve=root.querySelector('#approve'),cancel=root.querySelector('#cancel');
