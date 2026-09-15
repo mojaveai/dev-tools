@@ -45,6 +45,9 @@ if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
   # profile. A native receiver update only disconnects; Chrome stays running.
   systemctl --user stop dev-tools-shared-browser.service
 fi
+# Retire the receiver's previous host before replacing its dependency. Keeping
+# it alive can make copied authenticated tabs revoke the new browser's session.
+"$node_path" "$runtime_dir/host-migration.mjs" "$browser_host_service"
 if [ "$browser_engine" = headless ]; then
   systemctl --user disable --now "$browser_host_service" 2>/dev/null || true
 fi
