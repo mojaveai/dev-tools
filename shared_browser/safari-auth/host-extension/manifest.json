@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Dev Tools Auth — Isolated Host Test",
+  "version": "0.1.0",
+  "permissions": ["webAuthenticationProxy"],
+  "host_permissions": ["http://localhost/*"],
+  "background": {"service_worker": "host.js"}
+}

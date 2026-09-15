@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Dev Tools Auth — Mac Test",
+  "version": "0.1.0",
+  "description": "Approve a disposable shared-browser passkey test using Safari.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost/*"],
+  "background": {"scripts": ["config.js", "background.js"], "persistent": false},
+  "action": {"default_popup": "popup.html", "default_title": "Dev Tools Auth"},
+  "content_scripts": [{"matches": ["http://localhost/*"], "js": ["approval.js"], "run_at": "document_idle", "all_frames": false}]
+}
