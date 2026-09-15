@@ -58,6 +58,17 @@ invoked the security key for the exact dashboard hostname. The tested key return
 dashboard authentication remains unverified until a matching enrolled credential
 is used. The relay's 10 automated tests and shared-viewer build passed.
 
+Follow-up: the owner confirmed this key signs in successfully in Chrome but fails
+even when visiting the dashboard directly in Safari. The live dashboard requests
+one USB credential for `manbir`, with the correct RP ID and user verification
+required. Read-only `ykman fido info` reports **Always Require UV: On**; PIN and
+fingerprint retries remain available. Yubico's [browser support matrix](https://developers.yubico.com/Developer_Program/WebAuthn_Starter_Kit/Browser_Support_Matrix.html)
+lists AlwaysUV as supported by Chrome on macOS and unsupported by Safari. This
+is a likely browser/key compatibility issue, not evidence that enrollment is
+missing. Do not reset or reenroll the key, or disable AlwaysUV, to troubleshoot
+the companion. A local Chrome approval companion is the next implementation
+option; the Safari prototype cannot bypass Apple's authenticator implementation.
+
 This remains an opt-in development extension, not a signed Safari App Store build.
 Safari may require unsigned extensions to be reenabled after restart. It requires
 this Mac and its relay to be online. iPhone is not configured. Up to 16 independent
