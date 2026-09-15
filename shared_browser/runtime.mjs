@@ -54,7 +54,8 @@ export class AgentRuntime {
     const wrap = (tab) => {
       const page = tab.page;
       const mutation = (fn) => performMutation(async () => {
-        await page.bringToFront();
+        if(s.activate)await s.activate(tab);
+        else await page.bringToFront();
         return fn();
       });
       const feedback=(kind,element,fn)=>s.feedback ? s.feedback(tab,element,kind,fn) : fn();
