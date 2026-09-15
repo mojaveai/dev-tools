@@ -3,6 +3,17 @@
 # Sourced by provision.sh and every lib/*.sh module.
 # shellcheck disable=SC2034  # these are consumed by the sourcing scripts
 
+# macOS ships an older Python. Prefer Homebrew's tools in non-login shells too.
+if [ "$(uname -s)" = Darwin ]; then
+    for _brew_prefix in /opt/homebrew /usr/local; do
+        if [ -x "$_brew_prefix/bin/brew" ]; then
+            PATH="$_brew_prefix/bin:$_brew_prefix/sbin:$PATH"
+            export PATH
+            break
+        fi
+    done
+fi
+
 # --- exit codes modules return -----------------------------------------------
 # 0  OK       already in the desired state, nothing to do
 # 10 UPDATED  something was installed or changed
@@ -99,13 +110,12 @@ managed_block() {
     awk -v b="$_begin" -v e="$_end" '
         $0 == b { skip = 1; next }
         $0 == e { skip = 0; next }
-        !skip   { print }
+        !skip {
+            if ($0 == "") { blanks++; next }
+            while (blanks > 0) { print ""; blanks-- }
+            print
+        }
     ' "$_file" > "$_tmp" || { rm -f "$_tmp"; return 1; }
-
-    # Drop trailing blank lines so repeated runs do not accumulate them.
-    while [ -s "$_tmp" ] && [ -z "$(tail -n 1 "$_tmp")" ]; do
-        sed -i '$ d' "$_tmp" 2>/dev/null || break
-    done
 
     {
         [ -s "$_tmp" ] && echo ''
@@ -116,7 +126,10 @@ managed_block() {
 
     # Preserve the original mode; default to 0600 for new files.
     if [ -f "$_file" ]; then
-        _mode=$(stat -c '%a' "$_file" 2>/dev/null || echo 600)
+        case "$(uname -s)" in
+            Darwin) _mode=$(stat -f '%Lp' "$_file") ;;
+            *) _mode=$(stat -c '%a' "$_file" 2>/dev/null || echo 600) ;;
+        esac
     else
         _mode=600
     fi

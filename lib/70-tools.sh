@@ -6,8 +6,8 @@ mod_mosh() {
         note "client and server present"
         return "$RC_OK"
     fi
-    can_privileged || { note "Mosh missing; root/sudo required to install"; return 1; }
     pkg_manager >/dev/null || { note "Mosh missing; no known package manager"; return 1; }
+    can_install_packages || { note "Mosh missing; root/sudo required to install"; return 1; }
     pkg_refresh_once
     info "installing Mosh client and server"
     pkg_install mosh || { note "Mosh package installation failed"; return 1; }
@@ -47,6 +47,13 @@ mod_ripgrep() {
     if [ -x "$BIN_DIR/rg" ] || command -v rg 2>/dev/null | grep -q '^/'; then
         _v=$(rg --version 2>/dev/null | head -1 | awk '{print $2}')
         [ -n "$_v" ] && { note "ripgrep $_v"; return "$RC_OK"; }
+    fi
+
+    if [ "$(uname -s)" = Darwin ]; then
+        pkg_install ripgrep || { note "ripgrep installation failed"; return 1; }
+        have rg || { note "ripgrep not on PATH"; return 1; }
+        note "ripgrep installed with Homebrew"
+        return "$RC_UPDATED"
     fi
 
     case "$(arch)" in

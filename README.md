@@ -3,6 +3,14 @@
 One command to take any Linux machine to a working development environment —
 and to keep it there.
 
+macOS desktop setup is also supported with [Homebrew](https://brew.sh) installed.
+It installs Mosh and missing command-line tools, configures tmux scrolling,
+applies the mobile keymaps, links agent skills, and adds the `dev-tools` command
+to zsh and bash. Install Codex and Claude Code separately; desktop provisioning
+reuses their existing installations and sign-ins. Linux host enrollment,
+credential provisioning, SSH-server setup, and browser daemons are skipped on macOS.
+Codex sessions keep running; restart them when ready to load a changed keymap.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
@@ -63,6 +71,8 @@ the host's package manager. To install just Mosh on an existing host:
 ```sh
 ./provision.sh --only mod_mosh
 ```
+
+This also works on macOS, where Mosh is installed with Homebrew without sudo.
 
 Connect with a Mosh-capable client, or run `mosh user@host` from a computer with
 Mosh installed. Mosh starts through SSH, then uses UDP ports **60000–61000** by

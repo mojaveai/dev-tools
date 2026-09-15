@@ -35,6 +35,14 @@ FAILED=0
 
 step() {
     _label=$1; _fn=$2
+    # Desktop setup uses existing CLI installations and sign-ins. Linux host
+    # enrollment, credential provisioning, and daemon setup are separate.
+    if [ "$(uname -s)" = Darwin ]; then
+        case "$_fn" in
+            mod_base|mod_mosh|mod_tmux|mod_keymaps|mod_desktop_shell|mod_skills|mod_uv|mod_ripgrep) : ;;
+            *) printf 'SKIP %s\n' "$_label|Linux host provisioning" >> "$RESULTS"; return 0 ;;
+        esac
+    fi
     if [ -n "${ONLY:-}" ]; then
         case " $ONLY " in
             *" $_fn "*) : ;;
@@ -111,6 +119,10 @@ Usage: provision.sh [options]
 Steps: mod_base mod_mosh mod_tmux mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
        mod_uv mod_ripgrep mod_g2 mod_browser mod_native_browser
+       mod_keymaps mod_desktop_shell
+
+macOS: install Homebrew first. Default desktop setup configures tools, keymaps,
+       skills and PATH; existing Codex/Claude installations and sign-ins are reused.
 EOF
 }
 
@@ -151,6 +163,8 @@ step "claude code"     mod_claude
 step "native browser"  mod_native_browser
 step "browser viewer"  mod_browser
 step "codex"           mod_codex
+step "keymaps"         mod_keymaps
+step "desktop shell"   mod_desktop_shell
 step "agent skills"    mod_skills
 step "ssh keys"        mod_sshid
 step "uv"              mod_uv

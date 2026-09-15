@@ -11,7 +11,14 @@ esac
 [ "$#" -le 1 ] || { printf 'Usage: dev-tools keymap [codex|claude|all]\n' >&2; exit 1; }
 
 if [ "$keymap_target" != claude ]; then
-    toml_merge "${CODEX_HOME:-$HOME/.codex}/config.toml" < "$REPO_DIR/config/codex/keymap.toml"
+    # A desktop may already use Keychain for sign-in. Only headless hosts need
+    # the file credential store; applying a keymap must preserve desktop auth.
+    if [ "$(uname -s)" = Darwin ]; then
+        sed '/^cli_auth_credentials_store =/d' "$REPO_DIR/config/codex/keymap.toml" \
+            | toml_merge "${CODEX_HOME:-$HOME/.codex}/config.toml"
+    else
+        toml_merge "${CODEX_HOME:-$HOME/.codex}/config.toml" < "$REPO_DIR/config/codex/keymap.toml"
+    fi
     case $? in 0|10) : ;; *) exit 1 ;; esac
     printf 'Codex mobile keymap applied. Restart Codex to use it.\n'
 fi

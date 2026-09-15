@@ -2,6 +2,10 @@
 # Baseline packages every later module assumes.
 
 pkg_manager() {
+    if [ "$(uname -s)" = Darwin ]; then
+        have brew && { echo brew; return 0; }
+        return 1
+    fi
     for m in apt-get dnf yum apk pacman zypper; do
         have "$m" && { echo "$m"; return 0; }
     done
@@ -16,7 +20,12 @@ pkg_install() {
         apk)     run_privileged apk add --no-cache "$@" ;;
         pacman)  run_privileged pacman -S --noconfirm --needed "$@" ;;
         zypper)  run_privileged zypper install -y "$@" ;;
+        brew)    brew install "$@" ;;
     esac
+}
+
+can_install_packages() {
+    [ "$(pkg_manager)" = brew ] || can_privileged
 }
 
 pkg_refresh_once() {
@@ -47,6 +56,11 @@ base_pkg_for() {
     esac
 }
 
+base_have() {
+    have "$1" || return 1
+    [ "$1" != python3 ] || python3 -c 'import tomllib' >/dev/null 2>&1
+}
+
 mod_base() {
     ensure_dirs
     # Required: nothing else works without these.
@@ -54,17 +68,18 @@ mod_base() {
     # Optional: keyctl keeps the pass-cli key in the kernel keyring instead of on
     # disk; tmux lets a run over a mobile link survive a dropped connection.
     _opt='keyctl tmux'
+    [ "$(uname -s)" != Darwin ] || _opt='tmux'
 
     _missing=''
     for c in $_req $_opt; do
-        have "$c" || _missing="$_missing $c"
+        base_have "$c" || _missing="$_missing $c"
     done
     [ -z "$_missing" ] && { note "all present"; return "$RC_OK"; }
 
     _missing_req=''
-    for c in $_req; do have "$c" || _missing_req="$_missing_req $c"; done
+    for c in $_req; do base_have "$c" || _missing_req="$_missing_req $c"; done
 
-    if ! can_privileged; then
+    if ! can_install_packages; then
         if [ -n "$_missing_req" ]; then
             err "missing required:$_missing_req -- and no root/sudo to install them"
             note "missing:$_missing_req (no privileges)"
@@ -88,7 +103,7 @@ mod_base() {
     pkg_install $_pkgs || warn "package install reported an error"
 
     _still_req=''
-    for c in $_req; do have "$c" || _still_req="$_still_req $c"; done
+    for c in $_req; do base_have "$c" || _still_req="$_still_req $c"; done
     if [ -n "$_still_req" ]; then
         err "still missing after install:$_still_req"
         note "missing:$_still_req"
