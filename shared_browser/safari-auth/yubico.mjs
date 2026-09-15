@@ -16,7 +16,7 @@ try{hostToken=(await fs.readFile(path.join(local,'host-token'),'utf8')).trim();i
 catch(error){if(error.code!=='ENOENT')throw error;hostToken=randomBytes(32).toString('hex');await fs.writeFile(path.join(local,'host-token'),hostToken,{mode:0o600,flag:'wx'});}
 await fs.cp(path.join(root,'extension'),path.join(local,'extension'),{recursive:true});
 const manifest=JSON.parse(await fs.readFile(path.join(local,'extension/manifest.json'),'utf8'));
-manifest.name='Dev Tools Auth';manifest.version='0.3.0';
+manifest.name='Dev Tools Auth';manifest.version='0.4.0';
 manifest.description='Approve authentication for the procbox shared browser.';
 const sitePattern='https://'+new URL(origin).hostname+'/*';
 manifest.host_permissions.push(sitePattern);manifest.content_scripts[0].matches.push(sitePattern);

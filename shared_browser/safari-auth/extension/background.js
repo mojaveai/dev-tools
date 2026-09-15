@@ -14,6 +14,14 @@ function sameTab(sender, binding) {
   return binding && sender.frameId === 0 && sender.tab?.id === binding.tabId &&
     new URL(sender.url).origin === binding.request.origin;
 }
+async function returnToViewer(binding) {
+  if (!binding.returnURL) return;
+  const url = new URL(binding.returnURL);
+  if (url.origin !== 'https://procbox.agent-trace.ts.net:8443' || url.pathname !== '/') return;
+  const tab = await api.tabs.get(binding.tabId).catch(() => null);
+  if (tab?.url && new URL(tab.url).origin === binding.request.origin)
+    await api.tabs.update(binding.tabId, {url:url.href, active:true});
+}
 api.runtime.onMessage.addListener(async (message, sender) => {
   try {
     // Only the extension popup may discover requests or create approval tabs.
@@ -32,11 +40,12 @@ api.runtime.onMessage.addListener(async (message, sender) => {
       if (prior) {
         await relay('/cancel', {id:prior.request.id}).catch(() => {});
         await api.storage.local.remove('binding');
-        await api.tabs.remove(prior.tabId).catch(() => {});
+        if(prior.returnURL)await returnToViewer(prior).catch(() => {});
+        else await api.tabs.remove(prior.tabId).catch(() => {});
       }
       // Create inactive first. Content-script readiness is retried until bound.
-      const tab = await api.tabs.create({url: 'about:blank', active: false});
-      await api.storage.local.set({binding: {tabId: tab.id, request, returnTabId:fromViewer?sender.tab.id:null, autoStart:fromViewer}});
+      const tab = fromViewer ? sender.tab : await api.tabs.create({url: 'about:blank', active: false});
+      await api.storage.local.set({binding: {tabId: tab.id, request, returnURL:fromViewer?viewerURL.href:null, autoStart:fromViewer}});
       await api.tabs.update(tab.id, {url: request.origin+(request.origin.startsWith('http://localhost:')?'/approval':'/'), active: true});
       return {opened: true};
     }
@@ -45,20 +54,13 @@ api.runtime.onMessage.addListener(async (message, sender) => {
     if (message.type === 'ready') {
       const requests = await relay('/pending');
       if (!requests.some(r => r.id === binding.request.id)) return {error: 'Request ended'};
-      return {request: binding.request, autoStart:binding.autoStart};
+      return {request: binding.request, autoStart:binding.autoStart, returnsToViewer:!!binding.returnURL};
     }
     if (message.id !== binding.request.id) throw Error('Request mismatch');
     if (message.type === 'complete' || message.type === 'cancel') {
       const result = await relay('/' + message.type, {id: message.id, response: message.response});
       await api.storage.local.remove('binding');
-      if (Number.isInteger(binding.returnTabId)) {
-        // Only return to the exact viewer tab that initiated this approval.
-        const returnTab = await api.tabs.get(binding.returnTabId).catch(() => null);
-        if (returnTab?.url && new URL(returnTab.url).origin === 'https://procbox.agent-trace.ts.net:8443') {
-          await api.tabs.update(binding.returnTabId, {active:true}).catch(() => {});
-          await api.tabs.remove(binding.tabId).catch(() => {});
-        }
-      }
+      await returnToViewer(binding).catch(() => {});
       return result;
     }
     throw Error('Unknown operation');

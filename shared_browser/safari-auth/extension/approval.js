@@ -17,6 +17,10 @@
   root.querySelector('#site').textContent=request.origin+' · Request '+request.id.slice(0,8);
   document.documentElement.append(host);
   const status=root.querySelector('#status'), approve=root.querySelector('#approve'),cancel=root.querySelector('#cancel');
+  if(result.returnsToViewer){
+    cancel.textContent='Cancel and return';
+    status.textContent='Approve to sign in to your shared browser. You’ll return there automatically.';
+  }
   const controller=new AbortController();
   let finished=false;
   const timer=setTimeout(()=>{controller.abort();approve.disabled=true;status.textContent='Request expired. Start a new request in the shared browser.';},Math.max(1,request.expiresAt-Date.now()));

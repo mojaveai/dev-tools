@@ -12,7 +12,7 @@ policy. The old procbox QA adapter on port 23581 remains available independently
   installs two user LaunchAgents: `com.dev-tools.auth-companion` and
   `com.dev-tools.auth-tunnel`. They start at login and restart on failure.
 - Safari: load `~/.local/share/dev-tools-safari-auth/local/extension` as a temporary
-  extension and enable it. Grant access to localhost and the exact dashboard host.
+  extension and enable it. Grant access to localhost the exact dashboard host, and the procbox viewer.
   The old `Dev Tools Auth — Mac Test` build can remain disabled.
 - Procbox: generated `local/host-extension` and `load-host.mjs` live in
   `~/.local/state/dev-tools/safari-auth-test`, with its `node_modules` symlink to
@@ -20,7 +20,7 @@ policy. The old procbox QA adapter on port 23581 remains available independently
   when the native Chrome endpoint changes. Chrome 153 accepted the unpacked
   extension in the already-running browser without restarting it.
 - Viewer: the existing passkey feed now includes the companion's public request
-  metadata and shows a notice directing the owner to Safari's toolbar extension.
+  metadata and offers an approval button connected to the Safari extension.
 
 The host and Safari use different pairing capabilities. No private passkey material
 is copied. Generated configuration must stay out of git; rotate it and recopy the
@@ -45,10 +45,13 @@ hostname override and use the real route.
 
 Click **Verify with YubiKey** in the remote dashboard. The viewer displays
 the request code and **Approve with passkey** when Dev Tools Auth has permission
-on the viewer. Click it, then **Continue with passkey** in the real-origin tab.
-Safari opens its native prompt. After delivery the extension closes only its
-approval tab and returns to the initiating viewer, where the site's actual result
-is visible. The toolbar request list remains a fallback. Select **Security Key**
+on the viewer. Clicking it navigates that same tab to the real dashboard origin.
+Safari attempts its native prompt immediately; **Continue with passkey** is a
+fallback if focus or browser activation rules require another click. After delivery the
+extension redirects the same tab to its original viewer URL, where the site’s
+actual result is visible. **Cancel and return** also redirects to the viewer.
+The redirect target comes from the initiating viewer, never from the remote site;
+its exact origin and root path are checked. No tabs are opened or closed in this flow. The toolbar request list remains a fallback. Select **Security Key**
 when needed. The YubiKey must
 already be registered for this dashboard's RP; old-host and Yubico demo credentials
 are not interchangeable. Only the dashboard's successful authenticated state
@@ -84,6 +87,14 @@ while Safari focused its address field, so the explicit Continue button remains.
 A short focus wait fixed the first-click `document is not focused` error; the first
 Continue click then opened Touch ID. Twelve tests cover request binding, exact
 viewer origin/top-frame checks, synthetic-click rejection and return-tab behavior.
+
+Version 0.4 live verification: the viewer's approval button navigated the existing
+tab to the dashboard origin and opened Touch ID immediately, with no Continue
+click. After approval that same tab returned to the viewer, showing Healthy and
+authenticated as `manbir`. Safari kept two tabs throughout. Thirteen tests pass,
+including same-tab completion/cancellation and preservation of the original
+viewer query and fragment. Only the Mac extension/runtime changed for this release;
+the already-deployed procbox viewer and Chrome companion remain compatible.
 
 An embedded native WKWebView is not part of this implementation. Apple's
 [passkey guidance](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys)
