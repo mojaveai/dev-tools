@@ -134,7 +134,11 @@ Contenteditable/IME fidelity, arbitrary cross-origin-frame input, and pixel-free
 canvas/WebGL support are not yet accepted.
 A separate cooperating-site passkey approval fixture is now available; see
 [the passkey fixture guide](shared-browser-passkey-fixture.md). Transparent WebAuthn
-interception and an approval-gated third-party credential service remain unimplemented.
+interception is not enabled in the regular shared browser. A separately tested
+[Safari authentication prototype](../shared_browser/safari-auth/README.md) is
+parked for future work; it passed real YubiKey registration and sign-in against
+Yubico's demo on an isolated procbox browser. The existing admin-dashboard passkey
+flow remains independent of that prototype.
 The inspected Agent Trace approval dashboard requires attested YubiKey Bio
 credentials, so a software credential must not be represented as compatible.
 

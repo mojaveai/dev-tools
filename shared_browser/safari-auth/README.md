@@ -1,5 +1,35 @@
 # Safari authentication companion: Mac pilot
 
+## Parked development prototype
+
+**Decision (2026-09-15): keep this as a development prototype and resume only
+when broader authentication forwarding is needed.** The regular procbox admin
+dashboard continues using its existing Agent Trace passkey adapter, including the
+separate approval-window fallback. This prototype is not required for that flow,
+does not change the dashboard's registered credentials or authentication policy,
+and is not part of the default dev-tools installation or production deployment.
+
+The isolated procbox test browser, Mac relay and SSH tunnel were stopped after
+testing, and the temporary Safari extension was disabled. Source, tests and
+reproduction instructions are retained below. Generated
+capabilities and browser profiles are local test artifacts, not committed assets;
+generate fresh pairing when resuming.
+
+### Resume here
+
+1. Read the successful Mac and Yubico results below and run the automated checks.
+2. Use `pilot.mjs` for the disposable local fixture, then `yubico.mjs` and the
+   isolated host extension to reproduce real remote-site authentication.
+3. Before general rollout, implement durable device pairing, per-agent request
+   routing, disconnect/restart recovery, navigation cancellation and explicit
+   per-site access. Preserve signed client data and the original site's verifier.
+4. Test interaction with the existing Agent Trace adapter before enabling the
+   proxy in the regular browser; avoid two handlers competing for one request.
+5. Validate iPhone Safari separately. The successful Mac tests do not establish
+   mobile support or universal compatibility with other sites and credential options.
+
+## Verified results
+
 Status: local prototype. **Real Safari registration and authentication passed on
 macOS on 2026-09-15**, using Safari 26.6.2. The user approved both requests and the
 original test site verified the registration and authentication signature. No

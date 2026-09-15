@@ -1,5 +1,9 @@
 # Face ID approvals for remote websites: feasibility research
 
+**Parked by user decision on 2026-09-15.** Keep the code and test findings for
+future expansion; the procbox admin dashboard retains its existing passkey flow.
+See the [prototype handoff and resume checklist](../shared_browser/safari-auth/README.md).
+
 Research date: 2026-09-15. This is an implementation proposal, not a deployed
 capability. The agent's browser remains on procbox. Existing Agent Trace inline
 approval is site-specific and does not establish arbitrary-site support.
