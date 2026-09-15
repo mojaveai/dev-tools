@@ -16,10 +16,12 @@ try{hostToken=(await fs.readFile(path.join(local,'host-token'),'utf8')).trim();i
 catch(error){if(error.code!=='ENOENT')throw error;hostToken=randomBytes(32).toString('hex');await fs.writeFile(path.join(local,'host-token'),hostToken,{mode:0o600,flag:'wx'});}
 await fs.cp(path.join(root,'extension'),path.join(local,'extension'),{recursive:true});
 const manifest=JSON.parse(await fs.readFile(path.join(local,'extension/manifest.json'),'utf8'));
-manifest.name='Dev Tools Auth';manifest.version='0.2.0';
+manifest.name='Dev Tools Auth';manifest.version='0.3.0';
 manifest.description='Approve authentication for the procbox shared browser.';
 const sitePattern='https://'+new URL(origin).hostname+'/*';
 manifest.host_permissions.push(sitePattern);manifest.content_scripts[0].matches.push(sitePattern);
+manifest.host_permissions.push('https://procbox.agent-trace.ts.net/*');
+manifest.content_scripts.push({matches:['https://procbox.agent-trace.ts.net/*'],js:['viewer.js'],run_at:'document_idle',all_frames:false});
 await fs.writeFile(path.join(local,'extension/manifest.json'),JSON.stringify(manifest,null,2));
 await fs.writeFile(path.join(local,'extension/config.js'),'const AUTH_CONFIG = '+JSON.stringify({relay:relayURL,site:origin,token,label:'procbox shared browser'})+';\n',{mode:0o600});
 await fs.cp(path.join(root,'host-extension'),path.join(local,'host-extension'),{recursive:true});

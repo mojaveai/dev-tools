@@ -4,11 +4,11 @@ import fs from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await fs.readFile(new URL('../extension/background.js',import.meta.url),'utf8');
 async function setup(){
-  let listener, state={},calls=[];
+  let listener, state={},calls=[],tabCalls=[];
   const request={id:'request',origin:'http://localhost:8812',kind:'get',publicKey:{challenge:'challenge'},expiresAt:Date.now()+120000};
-  const browser={runtime:{getURL:p=>'safari-web-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}},storage:{local:{get:async()=>state,set:async value=>Object.assign(state,value),remove:async key=>delete state[key]}},tabs:{create:async()=>({id:42}),update:async()=>{},remove:async()=>{},onRemoved:{addListener:()=>{}}}};
+  const browser={runtime:{getURL:p=>'safari-web-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}},storage:{local:{get:async()=>state,set:async value=>Object.assign(state,value),remove:async key=>delete state[key]}},tabs:{create:async()=>({id:42}),get:async id=>({id,url:'https://procbox.agent-trace.ts.net:8443/'}),update:async(...args)=>{tabCalls.push(['update',...args]);},remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}}}};
   vm.runInNewContext(source,{browser,URL,AUTH_CONFIG:{site:request.origin,relay:'http://localhost:8811',token:'test-capability'},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?[request]:{delivered:true}};}});
-  return {send:(message,sender)=>listener(message,sender),calls,request};
+  return {send:(message,sender)=>listener(message,sender),calls,request,tabCalls};
 }
 const popup={url:'safari-web-extension://test/popup.html'};
 test('web content cannot list requests or open approval tabs',async()=>{const app=await setup();for(const type of ['list','open'])assert.ok((await app.send({type,id:'request'},{url:'http://localhost:8812',frameId:0,tab:{id:1}})).error);assert.equal(app.calls.length,0);});
@@ -21,4 +21,20 @@ test('completion is bound to the extension-created top-level tab and request',as
   assert.equal((await app.send({type:'complete',id:'request',response:{}},sender)).delivered,true);
   assert.ok((await app.send({type:'complete',id:'request',response:{}},sender)).error);
   assert.equal(app.calls.filter(c=>c.url.endsWith('/complete')).length,1);
+});
+
+const viewer={url:'https://procbox.agent-trace.ts.net:8443/',frameId:0,tab:{id:7}};
+test('viewer opens only a matched pending request and returns after completion',async()=>{
+  const app=await setup();
+  const open={type:'viewer-open',code:'REQUEST',origin:app.request.origin};
+  for(const sender of [{...viewer,frameId:1},{...viewer,url:'https://procbox.agent-trace.ts.net:23581/'},{...viewer,url:'https://other.example/'},{...viewer,url:'https://procbox.agent-trace.ts.net:8443/other'}])assert.ok((await app.send(open,sender)).error);
+  assert.equal(app.calls.length,0);
+  assert.ok((await app.send({...open,code:'WRONG'},viewer)).error);
+  assert.ok((await app.send({...open,origin:'https://other.example'},viewer)).error);
+  assert.equal((await app.send(open,viewer)).opened,true);
+  const approval={url:app.request.origin+'/approval',frameId:0,tab:{id:42}};
+  assert.equal((await app.send({type:'ready'},approval)).autoStart,true);
+  assert.equal((await app.send({type:'complete',id:app.request.id,response:{}},approval)).delivered,true);
+  assert.ok(app.tabCalls.some(c=>c[0]==='update'&&c[1]===7&&c[2].active));
+  assert.ok(app.tabCalls.some(c=>c[0]==='remove'&&c[1]===42));
 });

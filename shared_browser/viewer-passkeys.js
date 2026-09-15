@@ -32,7 +32,12 @@ export class ViewerPasskeys {
         if(request.origin!=='https://cryptoagent-1-1.agent-trace.ts.net:3581')continue;
         const row=document.createElement('div');
         row.style.cssText='padding:12px;border:1px solid #a4c9e9;border-radius:10px;background:#eef7ff;color:#17202a';
-        row.textContent='Passkey requested · '+new URL(request.origin).hostname+' · '+request.code+'. Open Dev Tools Auth in your Mac Safari toolbar to approve with your YubiKey.';
+        row.textContent='Passkey requested · '+new URL(request.origin).hostname+' · '+request.code+' ';
+        const button=document.createElement('button');
+        button.dataset.devtoolsAuthCode=request.code;button.dataset.authOrigin=request.origin;
+        button.disabled=true;button.textContent='Enable Dev Tools Auth to approve here';
+        button.style.cssText='padding:9px 12px;margin-left:8px';
+        row.append(button);
         this.panel.append(row);continue;
       }
       const url = new URL(request.url);

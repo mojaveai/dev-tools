@@ -43,9 +43,13 @@ hostname override and use the real route.
 
 ## Use and verification
 
-Click **Verify with YubiKey** in the remote dashboard. The viewer should display
-the request code. Open **Dev Tools Auth** in Safari, select that request, and approve
-in the real-origin tab. Select **Security Key** when needed. The YubiKey must
+Click **Verify with YubiKey** in the remote dashboard. The viewer displays
+the request code and **Approve with passkey** when Dev Tools Auth has permission
+on the viewer. Click it, then **Continue with passkey** in the real-origin tab.
+Safari opens its native prompt. After delivery the extension closes only its
+approval tab and returns to the initiating viewer, where the site's actual result
+is visible. The toolbar request list remains a fallback. Select **Security Key**
+when needed. The YubiKey must
 already be registered for this dashboard's RP; old-host and Yubico demo credentials
 are not interchangeable. Only the dashboard's successful authenticated state
 establishes sign-in, not the companion's delivery message.
@@ -68,6 +72,25 @@ is a likely browser/key compatibility issue, not evidence that enrollment is
 missing. Do not reset or reenroll the key, or disable AlwaysUV, to troubleshoot
 the companion. A local Chrome approval companion is the next implementation
 option; the Safari prototype cannot bypass Apple's authenticator implementation.
+
+The owner subsequently enrolled an Apple passkey and the remote dashboard accepted
+it through this companion. Do not infer current credential policy solely from the
+older YubiKey-only UI wording or source checkout.
+
+Version 0.3 live verification: viewer button opened the exact-origin approval tab,
+Touch ID completed remote sign-in, and the approval tab closed automatically with
+the original viewer selected. Automatic authentication on tab load was blocked
+while Safari focused its address field, so the explicit Continue button remains.
+A short focus wait fixed the first-click `document is not focused` error; the first
+Continue click then opened Touch ID. Twelve tests cover request binding, exact
+viewer origin/top-frame checks, synthetic-click rejection and return-tab behavior.
+
+An embedded native WKWebView is not part of this implementation. Apple's
+[passkey guidance](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys)
+requires associated-domain configuration for ordinary app webviews; entitled
+browser apps have a separate path. The Safari extension retains real-origin tabs
+without requiring website changes. iPhone packaging and relay routing remain
+future work.
 
 This remains an opt-in development extension, not a signed Safari App Store build.
 Safari may require unsigned extensions to be reenabled after restart. It requires
