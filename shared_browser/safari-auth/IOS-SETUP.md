@@ -78,6 +78,10 @@ Apple: [Packaging a web extension](https://developer.apple.com/documentation/saf
 - Xcode 27 installed and its packager generated the iOS app/extension. The unsigned
   device build passes. The generator fixes the packager's app/extension bundle-ID
   mismatch before compilation.
-- Connected iPhone 15 Pro Max (iOS 26.7) is paired with this Mac; the owner switched
-  it to Agent Trace. Device Developer Mode and Apple signing-account setup are the
-  remaining installation prerequisites. No signed install or live Face ID result yet.
+- Connected iPhone 15 Pro Max (iOS 26.7) is paired with this Mac and on Agent Trace.
+  The owner enabled Developer Mode and configured an Apple Personal Team.
+- Both native targets built successfully with development signing after the owner
+  allowed codesign access to the Apple Development key. `devicectl` confirmed the
+  containing app was installed on the physical iPhone.
+- Safari extension enablement, private device pairing, and the live Face ID test
+  remain pending; installation alone does not verify authentication.
