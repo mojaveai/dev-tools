@@ -20,10 +20,12 @@ queue = ["alt-enter"]
 
 [tui.keymap.chat]
 # This opens/cycles pending questions before reaching the last queued message.
-edit_queued_message = ["ctrl-o"]
+# Ctrl+O is the default app Copy binding; it conflicts even across these tables.
+edit_queued_message = ["alt-o"]
 prompt_stack_back = ["ctrl-x"]
 skip_question = ["alt-s"]
 decrease_reasoning_effort = ["alt-minus"]
 increase_reasoning_effort = ["alt-="]
 previous_permission_mode = ["alt-p"]
-next_permission_mode = ["shift-tab"]
+# Shift+Tab is reserved for cycling collaboration mode.
+next_permission_mode = ["alt-n"]

@@ -330,11 +330,11 @@ work; actions that needed modified arrows have these replacements:
 
 | Action in Codex | Mobile shortcut |
 |---|---|
-| Open/cycle pending questions, then edit the last queued message | **Ctrl+O** |
+| Open/cycle pending questions, then edit the last queued message | **Alt+O** |
 | Move back through questions toward the composer | **Ctrl+X** |
 | Skip the focused question | **Alt+S** |
 | Decrease / increase reasoning effort | **Alt+- / Alt+=** |
-| Previous / next permission mode | **Alt+P / Shift+Tab** |
+| Previous / next permission mode | **Alt+P / Alt+N** |
 | Previous / next word | **Alt+B / Alt+F** |
 | Start / end of line | **Ctrl+A / Ctrl+E** |
 | Insert newline / submit draft | **Enter / Tab** |
@@ -353,7 +353,14 @@ As in normal provisioning, these commands manage the supplied keymap tables/file
 keep custom bindings in the repository if you want provisioning to retain them.
 Unrelated Codex settings, including model routing, are preserved. The map uses
 the actions in the [official Codex configuration schema](https://developers.openai.com/codex/config-schema.json)
-and was checked with Codex CLI 0.154.0.
+and was startup-tested with Codex CLI 0.154.0. Ctrl+O belongs to Copy, and
+Shift+Tab is reserved for cycling collaboration mode; binding chat actions to
+either can pass TOML/schema checks but fail interactive startup.
+
+Validate map changes with `python3 tests/codex_keymap_smoke.py ~/.local/bin/codex`
+from a trusted checkout. This starts the real TUI without submitting a prompt,
+checks the provisioned map, and confirms both known conflicting maps are rejected.
+Use `--installed` to check the current user's configuration instead.
 
 The Claude `Autocomplete` context is left alone, so Tab still accepts a completion
 while the popup is open. For Tab to submit unconditionally, add:
