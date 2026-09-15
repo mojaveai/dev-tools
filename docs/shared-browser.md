@@ -21,6 +21,12 @@ Both viewers and agents can interact without taking control. Individual actions
 execute through one ordered queue. There is no ownership lock or idle handback.
 Viewer disconnect does not pause the agent. Changes to the same field can still
 overwrite each other, as with two people using one browser.
+Every agent action selects its target tab in all connected viewers before cursor
+feedback and input. Retained handles to background tabs work the same way; merely
+reading a background tab does not switch the view. Foreground popups opened by the
+current page are followed, and closing the selected tab returns to Chrome's
+foreground tab. Reconnecting a viewer or restarting the receiver preserves the
+current target. Delayed input from an older tab cannot silently switch it back.
 MCP reconnect/reset preserves the browser but resets JavaScript
 bindings. Browser process failure is explicit; the service does not replay actions.
 
@@ -98,12 +104,20 @@ npm run build
 npm test
 # Against the running pilot on procbox; opens only synthetic test tabs:
 node test/live.mjs
+# Isolated Chrome + real MCP + two viewers; never touches the pilot:
+SHARED_BROWSER_CHROME=/path/to/google-chrome node test/tab-follow-live.mjs
 ```
 
 The live test uses the actual MCP SDK and stdio server, plus viewer WebSockets.
 It checks tool discovery, persistent bindings, form entry, DOM delivery, denied
 access, shared mutation access, stale input rejection, and viewer/MCP reconnect/reset.
 It does not establish that a second physical device can reach the Tailscale URL.
+
+`tab-follow-live.mjs` covers retained background handles, selection before cursor
+feedback, viewport sizing before clicks, late old-tab input, foreground popups,
+two-way form edits, manual tab selection, viewer disconnect/reconnect, and receiver
+restart with unsaved edits. Set `SHARED_BROWSER_WEBKIT_MODULE` to an installed
+Playwright module to exercise WebKit as the second viewer.
 
 Visual QA can use `test/qa-proxy.mjs` with a temporary loopback-only SSH forward.
 That helper injects the owner identity solely for local testing. It must never be

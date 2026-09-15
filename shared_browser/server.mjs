@@ -133,6 +133,24 @@ const session = {
   async update() {
     broadcast({ type: "state", ...(await this.state()) });
   },
+  async activate(tab) {
+    if(this.tabs.get(tab.id)!==tab)throw Error('Tab no longer exists; observe the browser again');
+    const changed=this.active!==tab.id;
+    if(changed) {
+      // Size the destination before resolving click coordinates or drawing
+      // action feedback. A viewer resize arrives later in the action queue.
+      const viewport=this.tabs.get(this.active)?.page.viewport();
+      const target=tab.page.viewport();
+      if(viewport && (viewport.width!==target?.width || viewport.height!==target?.height))
+        await tab.page.setViewport(viewport);
+      for(const ws of sockets)await remoteMouse.release(ws).catch(()=>{});
+    }
+    await tab.page.bringToFront();
+    if(changed) {
+      this.active=tab.id;
+      await this.update(); // Viewer selection precedes action/cursor events.
+    }
+  },
   async feedback(tab,element,kind,action) {
     let target={};
     if (sockets.size && element) {
@@ -167,7 +185,7 @@ const session = {
     const u = new URL(url);
     if (!["http:", "https:", "about:"].includes(u.protocol))
       throw Error("Only web pages are supported");
-    this.active = tab.id;
+    await this.activate(tab);
     await tab.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await this.update();
     return { id: tab.id, url: tab.page.url() };
@@ -175,7 +193,7 @@ const session = {
   async newTab(url) {
     const page = await browser.newPage();
     const tab = await attach(page);
-    this.active = tab.id;
+    await this.activate(tab);
     if (url) await this.navigate(tab, url);
     await this.update();
     return tab;
@@ -365,9 +383,14 @@ async function attachPage(page) {
   page.on("close", () => {
     uploads.releaseTab(tab.id).catch(err => console.error(err.message));
     session.tabs.delete(tab.id);
-    if (session.active === tab.id)
-      session.active = session.tabs.keys().next().value || null;
-    session.update().catch(() => {});
+    serial(async()=>{
+      if(session.active===tab.id) {
+        const next=await foregroundTab();
+        if(next)await session.activate(next);
+        else session.active=null;
+      }
+      await session.update();
+    }).catch(() => {});
   });
   return tab;
 }
@@ -376,8 +399,16 @@ browser.on("targetcreated", async (target) => {
     if (target.type() === "page") {
       const p = await target.page();
       if (p) {
-        await attach(p);
-        await session.update();
+        const tab=await attach(p);
+        await serial(async()=>{
+          const current=session.tabs.get(session.active);
+          // Follow a foreground popup opened by the page being controlled.
+          // Unrelated/background pages remain available until acted upon.
+          if(target.opener()===current?.page.target() &&
+              await p.evaluate(()=>document.visibilityState==='visible').catch(()=>false))
+            await session.activate(tab);
+          await session.update();
+        });
       }
     }
   } catch (err) {
@@ -387,8 +418,11 @@ browser.on("targetcreated", async (target) => {
 for (const page of await browser.pages()) await attach(page);
 // Reconnecting a receiver must follow Chrome's current page, not the first
 // tab returned by CDP. Otherwise the viewer silently jumps to an older tab.
-const existingVisibility=await Promise.all([...session.tabs.values()].map(async tab=>({tab,...await tab.page.evaluate(()=>({visible:document.visibilityState==='visible',focused:document.hasFocus()})).catch(()=>({}))})));
-session.active=(existingVisibility.find(t=>t.visible&&t.focused)||existingVisibility.find(t=>t.visible))?.tab.id||session.active;
+async function foregroundTab() {
+  const visible=await Promise.all([...session.tabs.values()].map(async tab=>({tab,...await tab.page.evaluate(()=>({visible:document.visibilityState==='visible',focused:document.hasFocus()})).catch(()=>({}))})));
+  return (visible.find(t=>t.visible&&t.focused)||visible.find(t=>t.visible))?.tab || session.tabs.values().next().value;
+}
+session.active=(await foregroundTab())?.id||session.active;
 await downloads.start(browser);
 const runtime = new AgentRuntime(session);
 async function body(req, max = 200000) {
@@ -599,17 +633,25 @@ wss.on("connection", (ws, req) => {
         }
         const t = session.tabs.get(message.tab || session.active);
         if (!t) throw Error("Tab no longer exists");
-        await t.page.bringToFront();
         if (message.type === "tab") {
-          session.active = t.id;
-          await session.update();
+          await session.activate(t);
           return;
+        }
+        // A delayed resize/hover from the previous view must not bring the
+        // old Chrome tab back after the agent has switched tabs.
+        if(t.id!==session.active) {
+          if(message.type==='resize' || message.type==='pointer') {
+            if(message.type==='pointer')await remoteMouse.release(ws);
+            return;
+          }
+          throw Error('Tab changed; wait for the updated view');
         }
         if (message.type === "goto") {
           await session.navigate(t, message.url);
           return;
         }
         if (message.type === "back") {
+          await t.page.bringToFront();
           await t.page.goBack({ waitUntil: "domcontentloaded" });
           return;
         }
@@ -629,6 +671,9 @@ wss.on("connection", (ws, req) => {
           await remoteMouse.release(ws);
           throw Error("Page changed; wait for the updated view");
         }
+        // Layout and hover are passive: a popup can become foreground while
+        // its recorder is still attaching, before session.active is updated.
+        if(message.type!=='pointer' || message.phase!=='move')await t.page.bringToFront();
         if (message.type==='pointer') {await remoteMouse.dispatch(ws,t,message);return;}
         if (message.type === 'cancelChooser') {
           if (t.chooser?.public.id === message.chooser) {

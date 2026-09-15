@@ -51,3 +51,17 @@ test('native-style coordinate clicks retain feedback and target the browser view
   await assert.rejects(r.execute('a','await tab.click([NaN, 1]);'),/finite/);
   assert.equal(events.length,3);
 });
+
+test('actions through retained tab handles activate the shared view before feedback',async()=>{
+  const events=[];
+  const tabs=new Map(['a','b'].map(id=>[id,{id,page:{url:()=>id,mouse:{click:async()=>events.push('click '+id)}}}]));
+  const r=new AgentRuntime({...session,tabs,agentAction:async fn=>fn(),
+    activate:async tab=>events.push('activate '+tab.id),
+    feedbackPoint:async(tab,point,kind,fn)=>{events.push('cue '+tab.id);return fn();},
+    snapshot:async tab=>({title:tab.id,text:'',elements:[]}),
+  });
+  await r.execute('a','const a=await cua.getTab("a");const b=await cua.getTab("b");await a.getAXState();');
+  assert.deepEqual(events,[],'observing background tabs does not move the shared view');
+  await r.execute('a','await b.click([10,20]);await a.click([20,30]);');
+  assert.deepEqual(events,['activate b','cue b','click b','activate a','cue a','click a']);
+});
