@@ -1,3 +1,4 @@
+import { ViewerAgents } from "./viewer-agents.js";
 import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
 import { controlOcclusion } from "./control-occlusion.js";
@@ -21,6 +22,7 @@ let ws,
   scale = 1,
   connected = false;
 const shell = new ViewerShell();
+const agentTabs = new ViewerAgents(tab=>send({type:"tab",tab}));
 let mouseRelay,mouseSupported=false;
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const passkeys = new ViewerPasskeys();
@@ -419,6 +421,7 @@ function eventReceived(message) {
 }
 function update(next) {
   state = next;
+  agentTabs.update(next);
   $("take").disabled = !connected || own();
   $("give").disabled = !own();
 
@@ -478,6 +481,7 @@ function connect() {
       }
       if (m.type === "hello") {clientId = m.clientId;mouseSupported=m.mouseInput===1;}
       if (m.type === "state") update(m);
+      if (m.type === "agentTabs" && state) {state.agents=m.agents;agentTabs.update(state);}
       if (m.type === "event") eventReceived(m);
       // Keep the last rendered document until replacement events arrive.
       // Older servers also announce hash/history changes as navigation: those

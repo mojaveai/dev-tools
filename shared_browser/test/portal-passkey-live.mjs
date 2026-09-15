@@ -7,8 +7,12 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
+import {verifyAuthenticationResponse} from '@simplewebauthn/server';
 import {PasskeyGate} from '../passkey-gate.mjs';
 const origin='http://localhost:8798', bridge='http://127.0.0.1:8799';
+const viewerOrigin='http://localhost:8800';
+const parent=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<iframe style="width:480px;height:320px" sandbox="allow-scripts allow-same-origin" allow="publickey-credentials-get" src="'+origin+'/_shared-browser-passkey/?request='+new URL(req.url,viewerOrigin).searchParams.get('request')+'&embed=1"></iframe>');});
+await new Promise(r=>parent.listen(8800,'127.0.0.1',r));
 const gate=new PasskeyGate({origin,persist:async()=>{}});let request,verified=false;
 const site=`<!doctype html><button id="login">Sign in</button><button id="abort">Cancel</button><p id="status">Locked</p><script>
 let controller;
@@ -24,7 +28,13 @@ const server=http.createServer(async(req,res)=>{try{
   const up=http.request(bridge+req.url,{method:req.method,headers:{...req.headers,'x-shared-browser-edge':'qa-dashboard'}},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});up.on('error',()=>{res.writeHead(502);res.end();});req.pipe(up);return;
  }
  if(req.url==='/options'){verified=false;request=gate.start('remote-site');const options=await gate.authenticationOptions(request.id,'phone');options.hints=['security-key','client-device'];options.allowCredentials=options.allowCredentials.map(c=>({...c,transports:['usb']}));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(options));return;}
- if(req.url==='/verify'){const parts=[];for await(const p of req)parts.push(p);await gate.approve(request.id,'phone',JSON.parse(Buffer.concat(parts)));verified=true;res.end('{}');return;}
+ if(req.url==='/verify'){const parts=[];for await(const p of req)parts.push(p);const response=JSON.parse(Buffer.concat(parts));
+ const client=JSON.parse(Buffer.from(response.response.clientDataJSON,'base64url'));
+ if(client.crossOrigin){
+  const result=await verifyAuthenticationResponse({response,expectedChallenge:gate.get(request.id).challenge,expectedOrigin:origin,expectedTopOrigin:viewerOrigin,expectedRPID:gate.rpID,credential:gate.credential,requireUserVerification:true});
+  assert.equal(result.verified,true);gate.credential.counter=result.authenticationInfo.newCounter;
+ }else await gate.approve(request.id,'phone',response);
+ verified=true;res.end('{}');return;}
  res.setHeader('Content-Type','text/html');res.end(site);
 }catch(e){res.writeHead(400);res.end(JSON.stringify({error:e.message}));}});
 await new Promise(r=>server.listen(8798,'127.0.0.1',r));
@@ -43,10 +53,11 @@ try{
  await fs.mkdir(path.join(state,'profile'));
  await fs.writeFile(path.join(state,'profile/DevToolsActivePort'),'1\n/devtools/browser/stale');
  await fs.writeFile(path.join(state,'browser-host.json'),JSON.stringify({browserWSEndpoint:browser.wsEndpoint()}));
- worker=spawn(process.execPath,[fileURLToPath(new URL('../portal-passkey-bridge.mjs',import.meta.url))],{env:{...process.env,PORTAL_ORIGIN:origin,PORTAL_BRIDGE_PORT:'8799',PORTAL_BROWSER_WS:'',SHARED_BROWSER_STATE:state},stdio:['ignore','pipe','pipe']});
+ worker=spawn(process.execPath,[fileURLToPath(new URL('../portal-passkey-bridge.mjs',import.meta.url))],{env:{...process.env,PORTAL_ORIGIN:origin,PORTAL_VIEWER_ORIGIN:viewerOrigin,PORTAL_BRIDGE_PORT:'8799',PORTAL_BROWSER_WS:'',SHARED_BROWSER_STATE:state},stdio:['ignore','pipe','pipe']});
+ worker.stderr.on('data',b=>process.stderr.write(b));
  await wait(async()=>{try{return (await fetch(bridge+'/agent/state')).ok;}catch{return false;}});
  const remote=await browser.newPage();await remote.goto(origin+'/');
- await wait(()=>remote.evaluate(()=>!!window.__portalPasskeyHook));
+ await wait(()=>remote.evaluate(()=>!!window.__portalPasskeyHook && typeof window.__portalPasskeyWait==="function" && typeof window.__portalPasskeyCancel==="function"));
  await remote.click('#login');
  const pending=await wait(async()=> (await(await fetch(bridge+'/agent/state')).json())[0]);
  assert.equal(verified,false);
@@ -56,6 +67,36 @@ try{
  console.log('PASS current managed browser endpoint wins over stale legacy port; enrolled passkey signs on original RP origin; original verifier accepts response');
  const delivered=await fetch(bridge+new URL(pending.url).pathname+'request/'+new URL(pending.url).searchParams.get('request'),{headers:{'x-shared-browser-edge':'qa-dashboard'}});assert.equal(delivered.status,400);
  console.log('PASS delivered request cannot be fetched or reused');
+ // A real cross-origin iframe produces signed topOrigin and reaches the verifier.
+ await remote.click('#login');
+ const inline=await wait(async()=> (await(await fetch(bridge+'/agent/state')).json())[0]);
+ await phone.bringToFront();await phone.goto(viewerOrigin+'/?request='+new URL(inline.url).searchParams.get('request'));
+ const frame=await wait(()=>phone.frames().find(f=>f.url().includes('embed=1')));
+ await frame.waitForSelector('#approve:not([disabled])');await frame.click('#approve');
+ await wait(()=>verified).catch(async error=>{console.error(await frame.$eval('#status',e=>e.textContent));throw error;});
+ assert.equal(phone.url().startsWith(viewerOrigin),true);
+ console.log('PASS cross-origin inline approval preserves the viewer and verifies the signed expected parent origin');
+ if(process.env.SHARED_BROWSER_WEBKIT_MODULE){
+  await remote.bringToFront();await remote.click('#login');
+  const pending=await wait(async()=> (await(await fetch(bridge+'/agent/state')).json())[0]);
+  const {webkit}=await import(process.env.SHARED_BROWSER_WEBKIT_MODULE);
+  const safari=await webkit.launch({headless:true});
+  try{
+   const page=await safari.newPage({viewport:{width:390,height:780}});
+   await page.addInitScript(()=>{
+    navigator.credentials.get=async({publicKey})=>({id:'test',rawId:new Uint8Array([1]).buffer,type:'public-key',getClientExtensionResults:()=>({}),response:{
+      clientDataJSON:new TextEncoder().encode(JSON.stringify({type:'webauthn.get',origin:location.origin,crossOrigin:true})).buffer,
+      authenticatorData:new Uint8Array(37).buffer,signature:new Uint8Array([1]).buffer,userHandle:null,
+    }});
+   });
+   await page.goto(viewerOrigin+'/?request='+new URL(pending.url).searchParams.get('request'));
+   const frame=page.frameLocator('iframe');await frame.locator('#approve:not([disabled])').click();
+   await wait(async()=>(await frame.locator('#status').textContent()).includes('separate approval window'));
+   assert.equal(verified,false);assert.equal((await(await fetch(bridge+'/agent/state')).json()).length,1);
+   console.log('PASS WebKit inline panel remains usable; missing signed topOrigin preserves request for separate-window fallback');
+  }finally{await safari.close();}
+  await remote.click('#abort');await wait(async()=>(await(await fetch(bridge+'/agent/state')).json()).length===0);
+ }
  // The streamlined flow prompts on load and returns to the existing viewer.
  for(const requireTap of [false,true]) {
   await remote.bringToFront();await remote.click('#login');
@@ -80,4 +121,4 @@ try{
  await remote.click('#login');await wait(async()=> (await(await fetch(bridge+'/agent/state')).json()).length===1);await remote.click('#abort');
  await wait(async()=> (await remote.$eval('#status',e=>e.textContent)).startsWith('Denied'));
  assert.equal(verified,false);console.log('PASS remote cancellation leaves site locked');
-}finally{worker?.kill('SIGTERM');await browser.close();await new Promise(r=>server.close(r));await fs.rm(state,{recursive:true,force:true});}
+}finally{worker?.kill('SIGTERM');await browser.close();await new Promise(r=>server.close(r));await new Promise(r=>parent.close(r));await fs.rm(state,{recursive:true,force:true});}

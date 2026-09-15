@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {approvalOriginAllowed} from './portal-passkey-origin.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -7,6 +8,7 @@ import puppeteer from 'puppeteer-core';
 import {browserConnection} from './browser-endpoint.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const origin=process.env.PORTAL_ORIGIN || 'https://procbox.agent-trace.ts.net:23581', prefix='/_shared-browser-passkey';
+const viewerOrigin=new URL(process.env.PORTAL_VIEWER_ORIGIN || 'https://procbox.agent-trace.ts.net:8443').origin;
 const requests=new Map(),attached=new WeakSet();
 const hook=(await fs.readFile(path.join(root,'portal-passkey-hook.js'),'utf8')).replaceAll('https://procbox.agent-trace.ts.net:23581',new URL(origin).origin);
 const code=id=>id.slice(0,8).toUpperCase();
@@ -41,7 +43,7 @@ const server=http.createServer(async(req,res)=>{
    if(req.headers['x-shared-browser-edge']!=='qa-dashboard')return json(res,{error:'Use the development portal URL'},403);
    const files={[prefix+'/']:['portal-passkey.html','text/html'],[prefix+'/client.js']:['portal-passkey-client.js','text/javascript']};
    if(req.method==='GET'&&files[u.pathname]){
-     const [name,type]=files[u.pathname];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",'X-Content-Type-Options':'nosniff'});return res.end(await fs.readFile(path.join(root,'dist',name)));
+     const [name,type]=files[u.pathname];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors "+viewerOrigin+"; base-uri 'none'",'X-Content-Type-Options':'nosniff'});return res.end(await fs.readFile(path.join(root,'dist',name)));
    }
    const match=u.pathname.match(/^\/_shared-browser-passkey\/request\/([a-f0-9]{48})(?:\/(respond|cancel))?$/);
    if(!match)return json(res,{error:'Not found'},404);
@@ -55,7 +57,7 @@ const server=http.createServer(async(req,res)=>{
    const response=body.response;
    const client=JSON.parse(Buffer.from(response.response.clientDataJSON,'base64url').toString());
    const auth=Buffer.from(response.response.authenticatorData,'base64url');
-   if(client.type!=='webauthn.get'||client.origin!==origin||client.challenge!==r.publicKey.challenge||client.crossOrigin===true||auth.length<37||(auth[32]&5)!==5)throw Error('Passkey response does not match this request or lacks user verification');
+   if(client.type!=='webauthn.get'||!approvalOriginAllowed(client,origin,viewerOrigin)||client.challenge!==r.publicKey.challenge||auth.length<37||(auth[32]&5)!==5)throw Error('Passkey response does not match this request or lacks user verification');
    if(r.publicKey.allowCredentials?.length&&!r.publicKey.allowCredentials.some(c=>c.id===response.id))throw Error('Unexpected credential');
    if(new URL(r.page.url()).origin!==origin)throw Error('Dashboard navigation changed');
    // The original portal server remains the signature verifier. Never report login success here.

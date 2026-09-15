@@ -116,7 +116,7 @@ if systemctl --user is-active --quiet dev-tools-portal-passkey.service; then
     exit 1
   fi
   if [ "$portal_runtime" != "$runtime_dir" ]; then
-    install -m 0644 browser-endpoint.mjs settings.mjs portal-passkey-bridge.mjs portal-passkey-hook.js "$portal_runtime/"
+    install -m 0644 browser-endpoint.mjs settings.mjs portal-passkey-bridge.mjs portal-passkey-hook.js portal-passkey-origin.mjs "$portal_runtime/"
     mkdir -p "$portal_runtime/dist"
     install -m 0644 dist/portal-passkey.html dist/portal-passkey-client.js "$portal_runtime/dist/"
   fi

@@ -56,6 +56,7 @@ export class AgentRuntime {
       const mutation = (fn) => performMutation(async () => {
         if(s.activate)await s.activate(tab);
         else await page.bringToFront();
+        s.noteAgent?.(id,tab,"action");
         return fn();
       });
       const feedback=(kind,element,fn)=>s.feedback ? s.feedback(tab,element,kind,fn) : fn();
@@ -73,8 +74,10 @@ export class AgentRuntime {
           await h.dispose();
         }
       };
+      const snapshot=async()=>{s.noteAgent?.(id,tab,"reading");return s.snapshot(tab);};
+      const screenshot=async()=>{s.noteAgent?.(id,tab,"reading");return page.screenshot({encoding:"base64",type:"png"});};
       const ax = async () => {
-        const snap = await s.snapshot(tab);
+        const snap = await snapshot();
         return (
           `Tab ${tab.id}: ${snap.title}\nURL: ${page.url()}\nDocument: ${tab.generation}\n${snap.text}\n\nInteractive elements (node IDs):\n` +
           snap.elements
@@ -190,9 +193,9 @@ export class AgentRuntime {
           url: page.url(),
           generation: tab.generation,
           controller: s.controller,
-          dom: await s.snapshot(tab),
+          dom: await snapshot(),
         }),
-        domSnapshot: () => s.snapshot(tab),
+        domSnapshot: snapshot,
         getAXState: ax,
         goto: (url) => mutation(() => s.navigate(tab, url)),
         back: () =>
@@ -267,12 +270,12 @@ export class AgentRuntime {
         select: (selector, value) => locator("css",selector).select(value),
         screenshot: async () => ({
           type: "image",
-          data: await page.screenshot({ encoding: "base64", type: "png" }),
+          data: await screenshot(),
           mimeType: "image/png",
         }),
         getScreenshot: async () => ({
           type: "image",
-          data: await page.screenshot({ encoding: "base64", type: "png" }),
+          data: await screenshot(),
           mimeType: "image/png",
         }),
         handleDialog: (args) => mutation(() => s.handleDialog(tab, args)),
@@ -295,7 +298,7 @@ export class AgentRuntime {
         list: () => s.tabList(),
         get: (id) => get(id),
         new: (url) =>
-          mutation(async () => wrap(await s.newTab(url || "about:blank"))),
+          mutation(async () => {const tab=await s.newTab(url || "about:blank");s.noteAgent?.(id,tab,"action");return wrap(tab);}),
       },
     };
     ctx.cua = {

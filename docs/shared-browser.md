@@ -431,3 +431,21 @@ allowing these empty corner samples. `test/control-occlusion-webkit.mjs` (with
 `SHARED_BROWSER_WEBKIT_MODULE` set) covers both cases and verifies that a real
 partial overlay still blocks the form overlay. The live tailnet check verifies
 MCP edits reaching the viewer, viewer typing reaching MCP, and reconnect.
+
+## Recent agent tabs and inactivity cleanup
+
+The viewer follows agent mutations automatically. A persistent “Last” shortcut
+opens the most recently used or inspected tab. Browser controls include “Recent
+agent tabs”, with one last location per MCP connection (Agent 1, Agent 2, etc.).
+Read-only inspection updates these shortcuts without interrupting another active
+page. These labels identify connections, not verified human or agent names; they
+reset when the receiver restarts. Activity outside the shared-browser MCP is not
+attributed to an agent.
+
+Tabs expire after 72 hours without agent or user activity. Activity timestamps
+use Chrome target IDs and persist in the selected profile's `tab-activity.json`.
+Existing tabs start their clock when first observed by this version. Cleanup runs
+once per minute and preserves the currently viewed tab while a viewer is connected,
+pending dialogs/file choosers/passkey approvals, and detected edited form fields.
+Closing respects before-unload handlers. Chrome removes empty native tab groups
+when their last tab closes; groups are not used as an independent inactivity timer.

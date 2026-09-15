@@ -122,6 +122,16 @@ try {
   await wait(()=>pages[0].$eval('#error',e=>e.textContent===''),'stale-view notice clears automatically');
   assert.equal(await sourceB.$eval('#count',e=>e.textContent),'Click','rejected click was not replayed');
   console.log('PASS: stale document input is rejected and its retry notice clears without a refresh');
+  await act('await a.getAXState();');
+  assert.equal((await rpc('state')).activeTab,b,'background reading does not interrupt the foreground action');
+  await wait(()=>pages[0].$eval('#last-agent-activity',e=>!e.hidden && e.textContent.includes('Follow /a')),'last reading location visible');
+  await pages[0].click('#last-agent-activity');await both(a,'Follow /a');
+  await rpc('js',{context:'second-agent',code:`const tab=await cua.getTab('${b}');await tab.type('input','Second agent');`});
+  await both(b,'Follow /b');
+  const activity=(await rpc('state')).agents;
+  assert.equal(activity.length,2);assert.notEqual(activity[0].agent,activity[1].agent);
+  await wait(()=>pages[0].$$eval('#agent-tabs button',e=>e.length===2),'separate agent shortcuts');
+  console.log('PASS: last observed tab can be opened manually; separate agents retain individual recent locations');
   // Different viewer sizes must not strand a phone behind a desktop-sized replay.
   if(pages[1].setViewport)await pages[1].setViewport({width:390,height:780});
   else await pages[1].setViewportSize({width:390,height:780});

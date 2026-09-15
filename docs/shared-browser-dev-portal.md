@@ -121,14 +121,19 @@ user approved on their device, and the original portal verifier authenticated
 the remote session. The user confirmed watching navigation through the portal.
 The separate audit-log trusted-signer error remains a portal issue.
 
-The shared viewer now polls its owner-authenticated `/passkey-requests` endpoint
-for pending portal approvals. A card above the shared page opens the same-origin
-portal helper in a compact approval window with no opener access. It attempts the
-passkey prompt immediately and closes after delivering the response. If the browser
-requires another tap or the prompt is dismissed, the approval button remains
-available. Mobile browsers may show this window as a tab. Cards clear when delivered, canceled, or expired. This integration currently covers
-Agent Trace QA's same-origin broker; it is not a generic arbitrary-site passkey
-adapter. The helper still performs device verification on the portal origin.
+The shared viewer polls its owner-authenticated `/passkey-requests` endpoint.
+Pending approvals appear as an inline panel hosted on the portal's own origin,
+with delegated `publickey-credentials-get` permission. The owner taps the approval
+button and completes their device's native passkey prompt. A separate-window link
+remains available for browsers that cannot support the inline flow.
+
+The bridge accepts embedded assertions only when signed `origin` exactly matches
+`https://procbox.agent-trace.ts.net:23581` and signed `topOrigin` exactly matches
+`https://procbox.agent-trace.ts.net:8443`. Missing or unexpected parent origins are
+rejected. Safari versions lacking signed `topOrigin` retain the pending challenge
+for the separate-window fallback. The helper's CSP allows only that viewer as a
+frame ancestor. The signed response is never rewritten; Agent Trace still verifies
+the original challenge, credential, signature, RP ID and user verification.
 
 Downloads now live in a collapsed Downloads section. Dismiss hides a record on
 that viewing device across reloads without deleting the remote file or hiding
@@ -141,13 +146,16 @@ endpoint rejects requests without the owner identity (403). Shared Chrome was
 restarted for deployment; the portal's authenticated session survived. Reload
 the viewer to load the updated client bundle.
 
-### Why approval still uses a separate top-level window
+### Inline approval verification
 
-The existing portal verifier rejects WebAuthn assertions with `crossOrigin: true`.
-Embedding the helper inside the viewer (8443) would produce that flag because the
-portal uses a different origin (23581). Inline approval therefore needs an explicit
-portal verifier change; this adapter preserves its origin and verification rules.
-The automatic-close behavior only confirms delivery, not successful portal login.
-`test/portal-passkey-live.mjs` covers normal approval, automatic prompting/closing,
-a simulated gesture rejection followed by retry, request reuse, and cancellation
-using a disposable authenticator and an actual signature verifier.
+The previous blanket rejection of `crossOrigin: true` was in the dev-tools bridge;
+the earlier claim that Agent Trace's login verifier necessarily rejected it was
+too broad. The Rust library's explicit rejection inspected during investigation
+applied to registration. No Agent Trace authentication policy was changed here.
+
+`test/portal-passkey-live.mjs` exercises a real cross-origin iframe and disposable
+platform authenticator, verifying its signature and expected parent origin. It
+also covers automatic separate-window approval, gesture rejection/retry, reuse,
+and cancellation. With `SHARED_BROWSER_WEBKIT_MODULE`, it checks the mobile WebKit
+panel and missing-parent-origin fallback using a simulated unsupported response.
+The actual user's Safari/passkey combination still needs a human approval test.

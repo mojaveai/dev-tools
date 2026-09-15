@@ -1,4 +1,5 @@
 import http from "node:http";
+import {TabIdle} from "./tab-idle.mjs";
 import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
 import { compactImages } from "./compact-images.mjs";
 import { createSocketDelivery } from "./socket-delivery.mjs";
@@ -30,6 +31,8 @@ const owner = process.env.SHARED_BROWSER_OWNER || "manbir@asgroup.ai";
 const executablePath =
   settings.chrome || "/usr/bin/google-chrome";
 await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
+const idleTabs=new TabIdle(path.join(stateDir,"tab-activity.json"));
+await idleTabs.load();
 const recorder = await fs.readFile(path.join(root, "dist/recorder.js"), "utf8");
 // Diagnostic attachment keeps the desktop supervisor responsible for Chrome.
 const externalBrowserURL=process.env.SHARED_BROWSER_CDP_URL;
@@ -101,6 +104,17 @@ const actionFeedback=new ActionFeedback({send:broadcast,hasViewers:()=>sockets.s
 const session = {
   id: "pilot",
   tabs: new Map(),
+  agents: new Map(),
+  agentSequence: 0,
+  noteAgent(context,tab,kind) {
+    idleTabs.touch(tab.targetId);
+    const previous=this.agents.get(context);
+    this.agents.delete(context);
+    this.agents.set(context,{agent:previous?.agent || "Agent "+(++this.agentSequence),tab:tab.id,kind,at:Date.now()});
+    while(this.agents.size>32)this.agents.delete(this.agents.keys().next().value);
+    broadcast({type:"agentTabs",agents:this.agentTabs()});
+  },
+  agentTabs() {return [...this.agents.values()].filter(a=>this.tabs.has(a.tab) && Date.now()-a.at<7200000).reverse();},
   active: null,
   controller: "shared",
   message: "",
@@ -124,6 +138,7 @@ const session = {
       message: this.message,
       tabs: await this.tabList(),
       activeTab: this.active,
+      agents: this.agentTabs(),
       viewers: sockets.size,
       bytesSent: this.bytesSent,
       downloads: downloads.list(),
@@ -134,6 +149,7 @@ const session = {
     broadcast({ type: "state", ...(await this.state()) });
   },
   async activate(tab) {
+    idleTabs.touch(tab.targetId);
     if(this.tabs.get(tab.id)!==tab)throw Error('Tab no longer exists; observe the browser again');
     const changed=this.active!==tab.id;
     if(changed) {
@@ -276,6 +292,8 @@ async function attachPage(page) {
   session.tabs.set(tab.id, tab);
   tab.cdp = await page.createCDPSession();
   await tab.cdp.send('Page.enable');
+  tab.targetId=(await tab.cdp.send('Target.getTargetInfo')).targetInfo.targetId;
+  idleTabs.add(tab.targetId);
   const remember=(url,resource)=>{
     if(resource.bytes.length>8*1024*1024)return;
     const old=tab.resources.get(url);
@@ -328,6 +346,7 @@ async function attachPage(page) {
   });
   if (!session.active) session.active = tab.id;
   await page.exposeFunction("__sharedEmit", ({ generation, event }) => {
+    if(event.type===3 && [2,5].includes(event.data.source))idleTabs.touch(tab.targetId);
     // Cross-origin child recording is relayed by rrweb to the top-level recorder.
     if (event.type === 2) {
       tab.events = tab.events.filter((e) => e.event.type === 4).slice(-1);
@@ -424,6 +443,12 @@ async function foregroundTab() {
 }
 session.active=(await foregroundTab())?.id||session.active;
 await downloads.start(browser);
+// Persist activity by Chrome target ID so a receiver update does not reset age.
+// Newly discovered tabs start their 72-hour clock now; never infer old activity.
+async function expireIdleTabs(){
+  await idleTabs.sweep([...session.tabs.values()],{active:session.active,hasViewers:sockets.size>0});
+}
+setInterval(()=>serial(expireIdleTabs).catch(e=>console.error('Tab inactivity cleanup failed:',e.message)),60000).unref();
 const runtime = new AgentRuntime(session);
 async function body(req, max = 200000) {
   let size = 0,
@@ -565,7 +590,7 @@ const httpServer = http.createServer(async (req, res) => {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob: https://procbox.agent-trace.ts.net:23581; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     });
     res.end(zipped ? gzipSync(payload) : payload);
   } catch (err) {

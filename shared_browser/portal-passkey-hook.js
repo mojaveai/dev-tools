@@ -9,6 +9,7 @@
     if(options.signal?.aborted)throw new DOMException('Request canceled','AbortError');
     const pk=options.publicKey;
     const id=await window.__portalPasskeyStart({...pk,challenge:encode(pk.challenge),allowCredentials:pk.allowCredentials?.map(c=>({...c,id:encode(c.id)}))});
+    window.__portalPasskeyPending=id;
     const abort=()=>window.__portalPasskeyCancel(id).catch(()=>{});
     options.signal?.addEventListener('abort',abort,{once:true});
     if(options.signal?.aborted)abort();
@@ -21,6 +22,6 @@
       const credential=Object.create(PublicKeyCredential.prototype);
       Object.defineProperties(credential,{id:{value:result.id},rawId:{value:decode(result.rawId)},type:{value:'public-key'},authenticatorAttachment:{value:result.authenticatorAttachment || null},response:{value:response},getClientExtensionResults:{value:()=>result.clientExtensionResults || {}},toJSON:{value:()=>result}});
       return credential;
-    } finally {options.signal?.removeEventListener('abort',abort);}
+    } finally {if(window.__portalPasskeyPending===id)delete window.__portalPasskeyPending;options.signal?.removeEventListener('abort',abort);}
   };
 })();
