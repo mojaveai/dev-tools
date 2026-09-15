@@ -7,9 +7,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import zipfile
+from urllib.parse import urlsplit
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--xcode', action='store_true')
+parser.add_argument('--site', choices=['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com'], default='https://cryptoagent-1-1.agent-trace.ts.net:3581')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent
 output = root / 'local/ios'
@@ -19,15 +21,16 @@ for name in ('background.js', 'approval.js', 'viewer.js', 'popup.js', 'popup.htm
     shutil.copy2(root / 'extension' / name, resources / name)
 manifest = json.loads((root / 'extension/manifest.json').read_text())
 manifest.update(name='Dev Tools Auth', version='0.5.0', description='Approve your procbox shared browser sign-in with a passkey on this device.')
-manifest['host_permissions'] = ['https://procbox.agent-trace.ts.net/*', 'https://cryptoagent-1-1.agent-trace.ts.net/*']
+site_pattern = 'https://' + urlsplit(args.site).hostname + '/*'
+manifest['host_permissions'] = ['https://procbox.agent-trace.ts.net/*', site_pattern]
 manifest['content_scripts'] = [
-    {'matches': ['https://cryptoagent-1-1.agent-trace.ts.net/*'], 'js': ['approval.js'], 'run_at': 'document_idle', 'all_frames': False},
+    {'matches': [site_pattern], 'js': ['approval.js'], 'run_at': 'document_idle', 'all_frames': False},
     {'matches': ['https://procbox.agent-trace.ts.net/*'], 'js': ['viewer.js'], 'run_at': 'document_idle', 'all_frames': False},
 ]
 (resources / 'manifest.json').write_text(json.dumps(manifest, indent=2))
 (resources / 'config.js').write_text('const AUTH_CONFIG = ' + json.dumps({
     'mobile': True, 'relay': 'https://procbox.agent-trace.ts.net:8443/auth-companion',
-    'site': 'https://cryptoagent-1-1.agent-trace.ts.net:3581', 'label': 'procbox shared browser',
+    'site': args.site, 'label': 'procbox shared browser',
 }) + ';\n')
 archive = output / 'Dev-Tools-Auth-iOS.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:

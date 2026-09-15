@@ -1,5 +1,6 @@
 """Install the explicitly enabled Mac companion and its loopback-only SSH tunnel."""
 import os
+import argparse
 from pathlib import Path
 import plistlib
 import json
@@ -7,6 +8,9 @@ import secrets
 import shutil
 import subprocess
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--site', choices=['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com'], default='https://cryptoagent-1-1.agent-trace.ts.net:3581')
+args = parser.parse_args()
 source = Path(__file__).resolve().parent
 runtime = Path.home() / '.local/share/dev-tools-safari-auth'
 runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -37,7 +41,7 @@ if not host_token.exists() and (source / 'local/host-token').exists():
 node = shutil.which('node')
 if not node:
     raise SystemExit('Node.js is required')
-env = {'AUTH_SITE': 'https://cryptoagent-1-1.agent-trace.ts.net:3581'}
+env = {'AUTH_SITE': args.site}
 subprocess.run([node, str(runtime / 'yubico.mjs')], env={**os.environ, **env, 'AUTH_SETUP_ONLY': '1'}, check=True)
 agents = Path.home() / 'Library/LaunchAgents'
 agents.mkdir(parents=True, exist_ok=True)

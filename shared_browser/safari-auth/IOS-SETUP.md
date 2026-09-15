@@ -85,3 +85,27 @@ Apple: [Packaging a web extension](https://developer.apple.com/documentation/saf
   containing app was installed on the physical iPhone.
 - Safari extension enablement, private device pairing, and the live Face ID test
   remain pending; installation alone does not verify authentication.
+
+## Disposable Yubico demo test
+
+Use the same explicit site on the relay and iPhone build:
+
+```sh
+python3 shared_browser/safari-auth/install-mac.py --site https://demo.yubico.com
+python3 shared_browser/safari-auth/build-ios.py --site https://demo.yubico.com
+```
+
+Copy the generated `local/ios/extension/` resources into an existing Xcode
+project's extension Resources directory before building and reinstalling. Preserve
+its signing settings and bundle ID so the device pairing survives an app update.
+Allow the updated extension access to `demo.yubico.com` in iPhone Safari. Register
+a disposable passkey from the remote demo, approve creation on the phone, then
+perform a separate authentication and confirm the remote demo accepts it.
+Both commands default to cryptoagent when `--site` is omitted; use the same site
+for both when restoring the dashboard prototype. The relay accepts one site at
+a time. No dashboard enrollment is changed by a demo test.
+
+On this test iPhone the owner trusted the developer profile, opened the containing
+app, and enabled the extension after temporarily lifting their own Screen Time
+restriction. The owner confirmed mobile pairing succeeded. Face ID authentication
+has not yet been verified; dashboard tests lacked a confirmed usable phone passkey.
