@@ -55,6 +55,20 @@ It is built for a mobile SSH client (Termius, Blink):
 - **One tap to launch.** Save the one-liner as a Termius Snippet and run it on one
   host or several at once.
 
+### Mosh connections
+
+Provisioning installs and verifies `mosh`, `mosh-client`, and `mosh-server` using
+the host's package manager. To install just Mosh on an existing host:
+
+```sh
+./provision.sh --only mod_mosh
+```
+
+Connect with a Mosh-capable client, or run `mosh user@host` from a computer with
+Mosh installed. Mosh starts through SSH, then uses UDP ports **60000–61000** by
+default; the client must be able to reach those ports on the host through its
+firewall and network rules. See [Mosh usage](https://mosh.org/#usage).
+
 ## What it sets up
 
 | | |
@@ -62,11 +76,12 @@ It is built for a mobile SSH client (Termius, Blink):
 | Tailscale | joined, tagged, with **Tailscale SSH** enabled |
 | Claude Code | native install, settings, keybindings, long-lived OAuth token |
 | Codex | standalone install, keymap, login |
-| Keymaps | **Enter inserts a newline, Tab submits** — in both CLIs |
+| Keymaps | **Enter inserts a newline, Tab submits** in both CLIs; Codex mobile shortcuts avoid modified arrows |
 | Agent skills | everything in `skills/`, linked into both CLIs |
 | pass-cli | installed, left holding a scoped per-machine token |
 | gh | current upstream release, authenticated, wired into git |
 | SSH | your [sshid.io](https://sshid.io) public keys in `authorized_keys` |
+| Mosh | client and server installed and verified for roaming mobile connections |
 | Dev tools | `uv`, `ripgrep`, plus a `git`/`jq`/`curl`/`keyutils`/`tmux` baseline |
 | tmux scrolling | Mouse/trackpad scrollback enabled automatically, including in an existing tmux server |
 | g2-terminal | installed from its private release |
@@ -299,6 +314,36 @@ would be worse than one that left them alone. The keymap lives in
 modifiers; Codex reads `[tui.keymap.*]` in `config.toml` and uses `-`. A `+` in
 the Codex file fails at startup with `data did not match any variant of untagged
 enum KeybindingsSpec`. Codex needs a restart to pick up changes.
+
+The provisioned Codex map is designed for Termius on a phone. Plain arrows still
+work; actions that needed modified arrows have these replacements:
+
+| Action in Codex | Mobile shortcut |
+|---|---|
+| Open/cycle pending questions, then edit the last queued message | **Ctrl+O** |
+| Move back through questions toward the composer | **Ctrl+X** |
+| Skip the focused question | **Alt+S** |
+| Decrease / increase reasoning effort | **Alt+- / Alt+=** |
+| Previous / next permission mode | **Alt+P / Shift+Tab** |
+| Previous / next word | **Alt+B / Alt+F** |
+| Start / end of line | **Ctrl+A / Ctrl+E** |
+| Insert newline / submit draft | **Enter / Tab** |
+| Queue draft while Codex is working | **Alt+Enter** |
+
+These are the defaults on the next provisioning run. To apply only the keymap
+on a host with this checkout, without updates or login checks:
+
+```sh
+./bin/dev-tools keymap codex
+```
+
+Restart Codex afterward. `./bin/dev-tools keymap` applies both provisioned CLI
+maps; `./bin/dev-tools keymap claude` applies only the existing Claude map.
+As in normal provisioning, these commands manage the supplied keymap tables/files;
+keep custom bindings in the repository if you want provisioning to retain them.
+Unrelated Codex settings, including model routing, are preserved. The map uses
+the actions in the [official Codex configuration schema](https://developers.openai.com/codex/config-schema.json)
+and was checked with Codex CLI 0.154.0.
 
 The Claude `Autocomplete` context is left alone, so Tab still accepts a completion
 while the popup is open. For Tab to submit unconditionally, add:

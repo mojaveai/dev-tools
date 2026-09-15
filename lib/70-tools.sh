@@ -1,5 +1,23 @@
 #!/bin/sh
-# General dev tooling: uv, ripgrep.
+# General dev tooling: mosh, uv, ripgrep.
+
+mod_mosh() {
+    if have mosh && have mosh-client && have mosh-server; then
+        note "client and server present"
+        return "$RC_OK"
+    fi
+    can_privileged || { note "Mosh missing; root/sudo required to install"; return 1; }
+    pkg_manager >/dev/null || { note "Mosh missing; no known package manager"; return 1; }
+    pkg_refresh_once
+    info "installing Mosh client and server"
+    pkg_install mosh || { note "Mosh package installation failed"; return 1; }
+    if ! have mosh || ! have mosh-client || ! have mosh-server; then
+        note "Mosh installation incomplete; need mosh, mosh-client and mosh-server on PATH"
+        return 1
+    fi
+    note "client and server installed"
+    return "$RC_UPDATED"
+}
 
 mod_uv() {
     if have uv; then

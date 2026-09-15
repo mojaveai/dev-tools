@@ -1,14 +1,29 @@
 # Merged into ~/.codex/config.toml; other keys in that file are preserved.
 # Codex uses hyphens for modifiers (ctrl-enter), unlike Claude Code's plus.
+# Mobile SSH map: no modified arrow keys required. See README.md's keymap table.
 
 # A headless box has no keyring daemon; "file" avoids a startup failure.
 cli_auth_credentials_store = "file"
 
 [tui.keymap.editor]
 insert_newline = ["enter"]
+move_word_left = ["alt-b"]
+move_word_right = ["alt-f"]
+move_line_start = ["ctrl-a", "home"]
+move_line_end = ["ctrl-e", "end"]
 
 [tui.keymap.composer]
 submit = ["tab"]
 
 # Queue defaults to Tab in recent Codex versions; keep it distinct from Submit.
 queue = ["alt-enter"]
+
+[tui.keymap.chat]
+# This opens/cycles pending questions before reaching the last queued message.
+edit_queued_message = ["ctrl-o"]
+prompt_stack_back = ["ctrl-x"]
+skip_question = ["alt-s"]
+decrease_reasoning_effort = ["alt-minus"]
+increase_reasoning_effort = ["alt-="]
+previous_permission_mode = ["alt-p"]
+next_permission_mode = ["shift-tab"]

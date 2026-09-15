@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 repo = Path(__file__).resolve().parent.parent
-if len(sys.argv) > 1 and sys.argv[1] == "native-browser":
+if len(sys.argv) > 1 and sys.argv[1] == "keymap":
+    os.execv("/bin/sh", ["sh", str(repo / "config/apply-keymaps.sh"), *sys.argv[2:]])
+elif len(sys.argv) > 1 and sys.argv[1] == "native-browser":
     sys.path.insert(0, str(repo / "native_browser"))
     if len(sys.argv) > 2 and sys.argv[2] == "install-mac":
         from mac import main

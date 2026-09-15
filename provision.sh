@@ -108,7 +108,7 @@ Usage: provision.sh [options]
   --debug            verbose
   -h, --help         this help
 
-Steps: mod_base mod_tmux mod_tailscale mod_passcli mod_secrets
+Steps: mod_base mod_mosh mod_tmux mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
        mod_uv mod_ripgrep mod_g2 mod_browser mod_native_browser
 EOF
@@ -140,6 +140,7 @@ printf '%sdev-tools%s  provisioning %s (%s, %s)\n\n' \
     "$(arch)" "$(is_root && echo root || (can_privileged && echo 'sudo available' || echo 'unprivileged'))"
 
 step "base packages"   mod_base
+step "mosh"            mod_mosh
 step "tmux scrolling"  mod_tmux
 step "tailscale"       mod_tailscale
 step "pass-cli"        mod_passcli
