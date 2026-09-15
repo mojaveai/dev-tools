@@ -29,7 +29,7 @@ export class ViewerPasskeys {
     this.panel.replaceChildren();
     for (const request of current) {
       if(request.type==='extension'){
-        if(request.origin!=='https://cryptoagent-1-1.agent-trace.ts.net:3581')continue;
+        if(!['https://cryptoagent-1-1.agent-trace.ts.net:3581','https://demo.yubico.com'].includes(request.origin))continue;
         const row=document.createElement('div');
         row.style.cssText='padding:12px;border:1px solid #a4c9e9;border-radius:10px;background:#eef7ff;color:#17202a';
         row.textContent='Passkey requested · '+new URL(request.origin).hostname+' · '+request.code+' ';

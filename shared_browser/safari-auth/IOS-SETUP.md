@@ -107,5 +107,9 @@ a time. No dashboard enrollment is changed by a demo test.
 
 On this test iPhone the owner trusted the developer profile, opened the containing
 app, and enabled the extension after temporarily lifting their own Screen Time
-restriction. The owner confirmed mobile pairing succeeded. Face ID authentication
-has not yet been verified; dashboard tests lacked a confirmed usable phone passkey.
+restriction. The owner confirmed mobile pairing succeeded. The Yubico demo subsequently accepted both registration and authentication from
+the iPhone extension: remote Chrome displayed “Authentication successful!” and
+the relay logged delivery for both operations. This used the popup fallback,
+which required returning manually. The viewer had filtered out Yubico requests;
+the allowlist now includes the demo, with a regression test. Same-tab return on
+the physical iPhone still needs confirmation.
