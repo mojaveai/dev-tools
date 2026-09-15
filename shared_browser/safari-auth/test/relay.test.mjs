@@ -19,3 +19,16 @@ test('companion keeps simultaneous browser requests independent',async()=>{
  relay.complete(one.id,response());await one.promise;
  assert.equal(relay.list().length,1);relay.cancel(two.id);await assert.rejects(two.promise);
 });
+
+test('multiple approved sites stay isolated by origin and relying party',async()=>{
+ const origins=['https://demo.yubico.com','https://cryptoagent-1-1.agent-trace.ts.net:3581'];
+ const relay=new AuthRelay({origins,maxPending:16});
+ const requests=origins.map(site=>relay.start('get',{rpId:new URL(site).hostname,challenge:'one'},site));
+ for(const r of requests)r.promise.catch(()=>{});
+ assert.deepEqual(relay.list().map(r=>r.origin),origins);
+ assert.throws(()=>relay.start('get',{rpId:'evil.example',challenge:'one'},'https://evil.example'),/Unsupported origin/);
+ assert.throws(()=>relay.start('get',{rpId:'demo.yubico.com',challenge:'one'},origins[1]),/relying party/);
+ assert.throws(()=>relay.complete(requests[1].id,response({origin:origins[0]})),/does not match/);
+ for(let i=0;i<requests.length;i++){relay.complete(requests[i].id,response({origin:origins[i]}));await requests[i].promise;}
+ assert.equal(relay.list().length,0);
+});

@@ -2,13 +2,14 @@ import {randomBytes} from 'node:crypto';
 
 // This pilot accepts requests only from its trusted test driver, never a website API.
 export class AuthRelay {
-  constructor({origin, now=Date.now, ttl=120000,maxPending=1}) {
-    Object.assign(this,{origin,now,ttl,maxPending});this.requests=new Map();
+  constructor({origin, origins=origin?[origin]:[], now=Date.now, ttl=120000,maxPending=1}) {
+    Object.assign(this,{origin,origins:[...origins],now,ttl,maxPending});this.requests=new Map();
   }
-  start(kind, publicKey) {
+  start(kind, publicKey, origin=this.origin) {
+    if(!this.origins.includes(origin))throw Error('Unsupported origin');
     if (!['create','get'].includes(kind)) throw Error('Unsupported credential operation');
     const rp=kind==='create'?publicKey.rp?.id:publicKey.rpId;
-    if (rp!==new URL(this.origin).hostname || !publicKey.challenge) throw Error('Invalid relying party');
+    if (rp!==new URL(origin).hostname || !publicKey.challenge) throw Error('Invalid relying party');
     if(this.maxPending===1){for (const r of this.requests.values()) this.cancel(r.id);this.requests.clear();}
     else{
       for(const [id,r]of this.requests)if(r.status!=='pending'||this.now()>=r.expiresAt){this.cancel(id);this.requests.delete(id);}
@@ -16,7 +17,7 @@ export class AuthRelay {
     }
     const id=randomBytes(24).toString('hex');let resolve,reject;
     const promise=new Promise((a,b)=>{resolve=a;reject=b;});
-    const r={id,kind,origin:this.origin,publicKey:structuredClone(publicKey),expiresAt:this.now()+this.ttl,status:'pending',resolve,reject};
+    const r={id,kind,origin,publicKey:structuredClone(publicKey),expiresAt:this.now()+this.ttl,status:'pending',resolve,reject};
     this.requests.set(id,r);
     r.timer=setTimeout(()=>this.cancel(id),this.ttl);r.timer.unref();
     return {id,promise};

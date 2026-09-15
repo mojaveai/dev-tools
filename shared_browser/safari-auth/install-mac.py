@@ -9,8 +9,9 @@ import shutil
 import subprocess
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--site', choices=['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com'], default='https://cryptoagent-1-1.agent-trace.ts.net:3581')
+parser.add_argument('--site', choices=['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com'], action='append', help='Repeat to enable specific approved sites; defaults to both sites')
 args = parser.parse_args()
+sites = args.site or ['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com']
 source = Path(__file__).resolve().parent
 runtime = Path.home() / '.local/share/dev-tools-safari-auth'
 runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -41,7 +42,7 @@ if not host_token.exists() and (source / 'local/host-token').exists():
 node = shutil.which('node')
 if not node:
     raise SystemExit('Node.js is required')
-env = {'AUTH_SITE': args.site}
+env = {'AUTH_SITES': ','.join(sites)}
 subprocess.run([node, str(runtime / 'yubico.mjs')], env={**os.environ, **env, 'AUTH_SETUP_ONLY': '1'}, check=True)
 agents = Path.home() / 'Library/LaunchAgents'
 agents.mkdir(parents=True, exist_ok=True)

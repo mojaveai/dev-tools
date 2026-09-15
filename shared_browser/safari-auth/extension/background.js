@@ -44,7 +44,7 @@ api.runtime.onMessage.addListener(async (message, sender) => {
         r.id.slice(0,8).toUpperCase() === message.code && r.origin === message.origin);
       const request = matches.length === 1 && matches[0];
       if (!request) throw Error('Request expired');
-      if (request.origin !== AUTH_CONFIG.site) throw Error('This site is not enabled for the paired browser');
+      if (!(AUTH_CONFIG.sites || [AUTH_CONFIG.site]).includes(request.origin)) throw Error('This site is not enabled for the paired browser');
       const prior = (await api.storage.local.get('binding')).binding;
       if (prior) {
         await relay('/cancel', {id:prior.request.id}).catch(() => {});

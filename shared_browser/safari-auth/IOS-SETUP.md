@@ -88,7 +88,8 @@ Apple: [Packaging a web extension](https://developer.apple.com/documentation/saf
 
 ## Disposable Yubico demo test
 
-Use the same explicit site on the relay and iPhone build:
+Both sites are enabled by default. To deliberately restrict a test to one site,
+use the same explicit site on the relay and iPhone build:
 
 ```sh
 python3 shared_browser/safari-auth/install-mac.py --site https://demo.yubico.com
@@ -101,9 +102,10 @@ its signing settings and bundle ID so the device pairing survives an app update.
 Allow the updated extension access to `demo.yubico.com` in iPhone Safari. Register
 a disposable passkey from the remote demo, approve creation on the phone, then
 perform a separate authentication and confirm the remote demo accepts it.
-Both commands default to cryptoagent when `--site` is omitted; use the same site
-for both when restoring the dashboard prototype. The relay accepts one site at
-a time. No dashboard enrollment is changed by a demo test.
+Both commands enable cryptoagent and Yubico when `--site` is omitted. The flag
+can be repeated to select approved sites explicitly. Requests for both sites can
+be pending together, but each response remains bound to its original site,
+challenge, and credential operation. No dashboard enrollment is changed by a demo test.
 
 On this test iPhone the owner trusted the developer profile, opened the containing
 app, and enabled the extension after temporarily lifting their own Screen Time
@@ -115,5 +117,25 @@ the allowlist now includes the demo, with a regression test. After refreshing th
 appeared and the full Face ID flow stayed in one tab with automatic return.
 Remote Chrome showed “Authentication successful!” and the relay confirmed delivery
 for request `3a42524f`. This verifies the iPhone same-tab sign-in flow end to end.
-The current test deployment remains scoped to Yubico; restoring cryptoagent
-requires matching relay/build configuration and a credential available on the phone.
+The subsequent v0.6.0 build enables cryptoagent and Yubico together. Cryptoagent
+still requires a registered credential available on the phone.
+
+## Workload trial handoff — September 15, 2026
+
+- iPhone extension v0.6.0 and the Mac relay enable cryptoagent and Yubico together.
+  Procbox's viewer supports both approval cards. No shared Chrome or Codex session
+  restart is required. Safari may request website permission for cryptoagent again.
+- 19 automated tests pass, including simultaneous origins, cross-site rejection,
+  viewer rendering, same-tab return, and pairing/proxy isolation. Live relay routing
+  accepted and canceled a diagnostic request for each site. The full iPhone Yubico
+  sign-in was verified before this change; cryptoagent phone enrollment remains
+  dependent on the user's available credential.
+- Keep the Mac awake with the companion/tunnel running and the iPhone on Agent Trace.
+  This is still a Mac-backed prototype, not an always-on standalone phone service.
+- The installed Personal Team provisioning profile expires **2026-09-22 19:51 UTC**.
+  Rebuild/reinstall from Xcode before then for continued use. Reinstall over the
+  existing app with the same identity to preserve pairing; do not uninstall it.
+- Mac Safari's development extension files are updated in the runtime folder;
+  reload that temporary extension before using the expanded list on the Mac.
+- Development is parked here for workload feedback. Keep the explicit approved-site
+  lists in the relay, packagers, and viewer aligned if expanding this later.
