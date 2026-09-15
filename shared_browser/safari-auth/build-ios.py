@@ -1,6 +1,8 @@
 """Build secret-free iOS extension resources and optionally Apple's Xcode wrapper."""
 import argparse
 import json
+import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -34,14 +36,28 @@ with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
             bundle.write(file, file.name)
 print('Secret-free extension archive:', archive)
 if args.xcode:
+    env = dict(os.environ)
+    developer = Path('/Applications/Xcode.app/Contents/Developer')
+    if 'DEVELOPER_DIR' not in env and developer.exists():
+        env['DEVELOPER_DIR'] = str(developer)
     tool = None
+    diagnostic = ''
     for candidate in ('safari-web-extension-packager', 'safari-web-extension-converter'):
-        result = subprocess.run(['xcrun', '--find', candidate], capture_output=True, text=True)
+        result = subprocess.run(['xcrun', '--find', candidate], capture_output=True, text=True, env=env)
+        diagnostic = result.stderr.strip() or diagnostic
         if result.returncode == 0:
             tool = result.stdout.strip()
             break
     if not tool:
-        raise SystemExit('Install full Xcode, then rerun with --xcode. Command Line Tools alone are insufficient.')
+        raise SystemExit(diagnostic or 'Install full Xcode and complete its first-run setup, then rerun with --xcode.')
     subprocess.run([tool, str(resources), '--project-location', str(output / 'Xcode'),
         '--app-name', 'Dev Tools Auth', '--bundle-identifier', 'com.mojaveai.devtools.auth',
-        '--swift', '--ios-only', '--copy-resources', '--no-open', '--no-prompt'], check=True)
+        '--swift', '--ios-only', '--copy-resources', '--no-open', '--no-prompt'], check=True, env=env)
+    # Xcode 27's packager can derive the app ID from the display name while
+    # keeping the requested ID for the extension, which fails bundle validation.
+    project = output / 'Xcode/Dev Tools Auth/Dev Tools Auth.xcodeproj/project.pbxproj'
+    text = project.read_text()
+    text = re.sub(r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);',
+        lambda match: 'PRODUCT_BUNDLE_IDENTIFIER = com.mojaveai.devtools.auth' +
+        ('.Extension' if '.Extension' in match.group(1) else '') + ';', text)
+    project.write_text(text)

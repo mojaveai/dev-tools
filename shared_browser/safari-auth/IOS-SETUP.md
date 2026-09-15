@@ -75,5 +75,9 @@ Apple: [Packaging a web extension](https://developer.apple.com/documentation/saf
 - 16 automated relay/extension/proxy tests passed.
 - Procbox HTTPS proxy returned 403 without pairing and 200 with mobile pairing.
 - Shared Chrome stayed on its original PID during receiver deployment.
-- No signed iOS build or live iPhone/Face ID result yet; requires Xcode/signing,
-  phone access and tailnet reachability verification.
+- Xcode 27 installed and its packager generated the iOS app/extension. The unsigned
+  device build passes. The generator fixes the packager's app/extension bundle-ID
+  mismatch before compilation.
+- Connected iPhone 15 Pro Max (iOS 26.7) is paired with this Mac; the owner switched
+  it to Agent Trace. Device Developer Mode and Apple signing-account setup are the
+  remaining installation prerequisites. No signed install or live Face ID result yet.
