@@ -135,4 +135,5 @@ repo_dir=${SHARED_BROWSER_REPO:-$(dirname "$runtime_dir")}
 if [ ! -f "$repo_dir/native_browser/configure.py" ]; then repo_dir="$HOME/.local/share/dev-tools"; fi
 python3 "$repo_dir/shared_browser/configure.py" "$repo_dir" "$runtime_dir" "$node_path"
 systemctl --user disable --now dev-tools-native-browser-repair.path dev-tools-native-browser-repair.service 2>/dev/null || true
+python3 "$repo_dir/shared_browser/repair.py" --runtime "$runtime_dir" --node "$node_path"
 echo "Installed. Verify readiness, then publish the dedicated Tailscale Serve port 8443."
