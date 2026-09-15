@@ -1,4 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Dev Tools Auth</title>
 <style>body{font:14px system-ui;width:310px;padding:16px;color:#17202a}h1{font-size:19px}button{padding:10px;margin:6px 0;width:100%;cursor:pointer}p{overflow-wrap:anywhere}</style>
 <h1>Dev Tools Auth</h1><p>Approve authentication for your paired procbox browser.</p>
-<div id="requests">Checking…</div><button id="refresh">Refresh</button><script src="popup.js"></script></html>
+<div id="requests">Checking…</div><button id="refresh">Refresh</button>
+<details id="pairing" hidden><summary>Pair this iPhone</summary><p>Connect to the Agent Trace tailnet, then enter your device pairing key.</p><input id="pair-token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Device pairing key"><button id="pair">Pair device</button><p id="pair-status"></p></details>
+<script src="config.js"></script><script src="popup.js"></script></html>

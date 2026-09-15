@@ -1,4 +1,5 @@
 import http from "node:http";
+import {authCompanionProxy} from './auth-companion-proxy.mjs';
 import {TabIdle} from "./tab-idle.mjs";
 import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
 import { compactImages } from "./compact-images.mjs";
@@ -481,6 +482,7 @@ const httpServer = http.createServer(async (req, res) => {
         },
         403,
       );
+    if (url.pathname.startsWith('/auth-companion/')) return authCompanionProxy(req,res);
     if (url.pathname === '/upload' && req.method === 'POST') {
       if (req.headers.origin !== publicOrigin) return json(res, {error:'Invalid upload origin'}, 403);
       if (activeUploads >= 3) return json(res, {error:'Another transfer is in progress'}, 429);

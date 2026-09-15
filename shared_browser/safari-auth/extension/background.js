@@ -1,9 +1,12 @@
 /* The generated config contains a disposable relay capability, never a passkey. */
 const api = browser;
 async function relay(path, body) {
+  const token = AUTH_CONFIG.mobile ? (await api.storage.local.get('mobileToken')).mobileToken : AUTH_CONFIG.token;
+  if(!token)throw Error('Pair this iPhone in Dev Tools Auth first.');
   const response = await fetch(AUTH_CONFIG.relay + path, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: {Authorization: 'Bearer ' + AUTH_CONFIG.token, 'Content-Type': 'application/json'},
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    signal:AbortSignal.timeout(10000),
     ...(body === undefined ? {} : {body: JSON.stringify(body)}),
   });
   const data = await response.json();
@@ -26,6 +29,12 @@ api.runtime.onMessage.addListener(async (message, sender) => {
   try {
     // Only the extension popup may discover requests or create approval tabs.
     const fromPopup = sender.url === api.runtime.getURL('popup.html');
+    if(message.type === 'pair' && fromPopup && AUTH_CONFIG.mobile){
+      if(!/^[a-f0-9]{64}$/.test(message.token||''))throw Error('Enter the 64-character device pairing key.');
+      const response=await fetch(AUTH_CONFIG.relay+'/pending',{headers:{Authorization:'Bearer '+message.token},signal:AbortSignal.timeout(10000)});
+      if(!response.ok)throw Error('Pairing failed. Check the key and your Tailscale connection.');
+      await api.storage.local.set({mobileToken:message.token});return {paired:true};
+    }
     const viewerURL = sender.url && new URL(sender.url);
     const fromViewer = sender.frameId === 0 && Number.isInteger(sender.tab?.id) &&
       viewerURL.origin === 'https://procbox.agent-trace.ts.net:8443' && viewerURL.pathname === '/';

@@ -28,6 +28,11 @@ await fs.cp(path.join(root,'host-extension'),path.join(local,'host-extension'),{
 await fs.writeFile(path.join(local,'host-extension/config.js'),'const AUTH_HOST = '+JSON.stringify({relay:relayURL,token:hostToken})+';\n',{mode:0o600});
 if(process.env.AUTH_SETUP_ONLY==='1')process.exit(0);
 const relay=new AuthRelay({origin,maxPending:16});
+const mobileTokenFile=path.join(local,'mobile-token');
+let mobileToken;
+try{mobileToken=(await fs.readFile(mobileTokenFile,'utf8')).trim();}
+catch(error){if(error.code!=='ENOENT')throw error;mobileToken=randomBytes(32).toString('hex');await fs.writeFile(mobileTokenFile,mobileToken,{mode:0o600,flag:'wx'});}
+if(!/^[a-f0-9]{64}$/.test(mobileToken))throw Error('Invalid mobile pairing');
 const results=new Map();
 const json=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 async function body(req){let size=0;const parts=[];for await(const part of req){size+=part.length;if(size>100000)throw Error('Body too large');parts.push(part);}return JSON.parse(Buffer.concat(parts));}
@@ -37,7 +42,8 @@ http.createServer(async(req,res)=>{try{
   // credential response is exposed here. Approval APIs still require pairing.
   if(req.method==='GET'&&req.url==='/agent/state')return json(res,relay.list().map(r=>({type:'extension',origin:r.origin,code:r.id.slice(0,8).toUpperCase(),kind:r.kind,expiresAt:r.expiresAt})));
   const host=req.url.startsWith('/host/');
-  if(req.headers.authorization!=='Bearer '+(host?hostToken:token))return json(res,{error:'Unpaired client'},403);
+  const auth=req.headers.authorization;
+  if(host ? auth!=='Bearer '+hostToken : auth!=='Bearer '+token && auth!=='Bearer '+mobileToken)return json(res,{error:'Unpaired client'},403);
   if(!host&&req.method==='GET'&&req.url==='/pending')return json(res,relay.list());
   if(req.method!=='POST')return json(res,{error:'Not found'},404);
   const data=await body(req);

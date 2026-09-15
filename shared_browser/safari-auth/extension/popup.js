@@ -28,3 +28,13 @@ async function refresh() {
 }
 document.querySelector('#refresh').onclick = refresh;
 refresh();
+if(AUTH_CONFIG.mobile){
+  document.querySelector('#pairing').hidden=false;
+  document.querySelector('#pair').onclick=async()=>{
+    const field=document.querySelector('#pair-token');
+    const token=field.value.trim();field.value='';
+    const result=await browser.runtime.sendMessage({type:'pair',token}).catch(error=>({error:error.message}));
+    document.querySelector('#pair-status').textContent=result?.paired?'Paired. You can approve from the viewer.':result?.error||'Pairing failed';
+    if(result?.paired)await refresh();
+  };
+}

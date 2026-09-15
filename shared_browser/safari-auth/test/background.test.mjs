@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await fs.readFile(new URL('../extension/background.js',import.meta.url),'utf8');
-async function setup(){
+async function setup({mobile=false}={}){
   let listener, state={},calls=[],tabCalls=[];
   const request={id:'request',origin:'http://localhost:8812',kind:'get',publicKey:{challenge:'challenge'},expiresAt:Date.now()+120000};
   const browser={runtime:{getURL:p=>'safari-web-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}},storage:{local:{get:async()=>state,set:async value=>Object.assign(state,value),remove:async key=>delete state[key]}},tabs:{create:async()=>{tabCalls.push(['create']);return {id:42};},get:async id=>({id,url:state.tabURL||request.origin}),update:async(...args)=>{tabCalls.push(['update',...args]);if(args[1].url)state.tabURL=args[1].url;},remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}}}};
-  vm.runInNewContext(source,{browser,URL,AUTH_CONFIG:{site:request.origin,relay:'http://localhost:8811',token:'test-capability'},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?[request]:{delivered:true}};}});
+  vm.runInNewContext(source,{browser,URL,AbortSignal,AUTH_CONFIG:{mobile,site:request.origin,relay:'http://localhost:8811',token:'test-capability'},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?[request]:{delivered:true}};}});
   return {send:(message,sender)=>listener(message,sender),calls,request,tabCalls};
 }
 const popup={url:'safari-web-extension://test/popup.html'};
@@ -46,4 +46,17 @@ test('cancel redirects to the original viewer URL without closing the tab',async
  await app.send({type:'cancel',id:app.request.id},{url:app.request.origin+'/',frameId:0,tab:{id:7}});
  assert.equal(app.tabCalls.at(-1)[2].url,sender.url);
  assert.equal(app.tabCalls.filter(c=>c[0]==='create'||c[0]==='remove').length,0);
+});
+
+test('mobile pairing is popup-only and mobile requests use the separate device key',async()=>{
+ const app=await setup({mobile:true});
+ assert.ok((await app.send({type:'list'},popup)).error);
+ assert.equal(app.calls.length,0);
+ const token='a'.repeat(64);
+ assert.ok((await app.send({type:'pair',token},viewer)).error);
+ assert.equal(app.calls.length,0);
+ assert.ok((await app.send({type:'pair',token:'invalid'},popup)).error);
+ assert.equal((await app.send({type:'pair',token},popup)).paired,true);
+ assert.ok((await app.send({type:'list'},popup)).requests);
+ assert.equal(app.calls.at(-1).options.headers.Authorization,'Bearer '+token);
 });
