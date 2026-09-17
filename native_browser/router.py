@@ -28,7 +28,7 @@ def main():
     if args.check:
         health = SessionRouter(args.socket, local_runtime, lambda message: None).health()
         print(json.dumps(health) if args.json else health['route'] or 'unavailable')
-        return
+        return 0 if health['route'] else 1
     run(args.socket, local_runtime)
 
-if __name__ == '__main__': main()
+if __name__ == '__main__': raise SystemExit(main())

@@ -2,6 +2,17 @@
 set -eu
 cd "$(dirname "$0")"
 runtime_dir=$(pwd)
+# Fail before downloads, builds, or stopping an existing browser. Many Coder
+# containers do not run a user service manager even when systemctl is installed.
+service_backend=systemd
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    service_backend=supervisor
+    command -v supervisord >/dev/null && command -v supervisorctl >/dev/null || {
+        echo 'This pod has no user systemd manager. Install supervisor (or rerun provision.sh) for persistent shared-browser services.' >&2
+        exit 1
+    }
+fi
+python3 -c 'import tomllib' || { echo 'Shared browser requires Python 3.11 or newer.' >&2; exit 1; }
 node_path=${SHARED_BROWSER_NODE:-$(command -v node)}
 "$node_path" -e 'if(Number(process.versions.node.split(".")[0])<22)throw Error("Shared browser requires Node 22 or newer; set SHARED_BROWSER_NODE")'
 PATH="$(dirname "$node_path"):$PATH"
@@ -13,6 +24,14 @@ if [ -z "$browser_origin" ]; then
 fi
 browser_owner=${SHARED_BROWSER_OWNER:-manbir@asgroup.ai}
 browser_state=$("$node_path" "$runtime_dir/settings.mjs" stateDir)
+if [ -f "$browser_state/supervisor.conf" ]; then
+    # Preserve an existing backend if a user bus appears after installation.
+    service_backend=supervisor
+    command -v supervisord >/dev/null && command -v supervisorctl >/dev/null || {
+        echo 'The existing browser uses Supervisor; reinstall the supervisor package and rerun.' >&2
+        exit 1
+    }
+fi
 browser_host_service=$("$node_path" "$runtime_dir/settings.mjs" hostService)
 chrome_path=$("$node_path" "$runtime_dir/settings.mjs" chrome)
 if [ -z "$chrome_path" ]; then chrome_path=$(command -v google-chrome || true); fi
@@ -33,6 +52,7 @@ After=$browser_host_service"
 esac
 npm ci
 npm run build
+if [ "$service_backend" = systemd ]; then
 mkdir -p "$HOME/.config/systemd/user" "$browser_state"
 chmod 700 "$browser_state"
 browser_restore=false
@@ -47,7 +67,9 @@ if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
 fi
 # Retire the receiver's previous host before replacing its dependency. Keeping
 # it alive can make copied authenticated tabs revoke the new browser's session.
-"$node_path" "$runtime_dir/host-migration.mjs" "$browser_host_service"
+if systemctl --user cat dev-tools-shared-browser.service >/dev/null 2>&1; then
+    "$node_path" "$runtime_dir/host-migration.mjs" "$browser_host_service"
+fi
 if [ "$browser_engine" = headless ]; then
   systemctl --user disable --now "$browser_host_service" 2>/dev/null || true
 fi
@@ -122,6 +144,10 @@ if systemctl --user is-active --quiet dev-tools-portal-passkey.service; then
   fi
   systemctl --user restart dev-tools-portal-passkey.service
 fi
+else
+    python3 "$runtime_dir/services.py" install "$browser_state" "$runtime_dir" "$node_path" "$chrome_path" "$browser_origin" "$browser_owner" "${xvfb_path:-}" "$browser_engine"
+    "$node_path" "$runtime_dir/rpc-alias.mjs"
+fi
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/dev-tools-shared-browser" <<EOF
 #!/bin/sh
@@ -134,6 +160,18 @@ chmod 755 "$HOME/.local/bin/dev-tools-shared-browser"
 repo_dir=${SHARED_BROWSER_REPO:-$(dirname "$runtime_dir")}
 if [ ! -f "$repo_dir/native_browser/configure.py" ]; then repo_dir="$HOME/.local/share/dev-tools"; fi
 python3 "$repo_dir/shared_browser/configure.py" "$repo_dir" "$runtime_dir" "$node_path"
-systemctl --user disable --now dev-tools-native-browser-repair.path dev-tools-native-browser-repair.service 2>/dev/null || true
-python3 "$repo_dir/shared_browser/repair.py" --runtime "$runtime_dir" --node "$node_path"
-echo "Installed. Verify readiness, then publish the dedicated Tailscale Serve port 8443."
+if [ "$service_backend" = systemd ]; then
+    systemctl --user disable --now dev-tools-native-browser-repair.path dev-tools-native-browser-repair.service 2>/dev/null || true
+    python3 "$repo_dir/shared_browser/repair.py" --runtime "$runtime_dir" --node "$node_path"
+else
+    python3 "$repo_dir/shared_browser/repair.py" --once --runtime "$runtime_dir" --node "$node_path"
+fi
+"$node_path" "$runtime_dir/cli.mjs" start || {
+    if [ "$service_backend" = supervisor ]; then
+        echo "Shared browser did not become ready. Inspect $browser_state/chrome.log and $browser_state/receiver.log, then rerun." >&2
+    else
+        echo 'Shared browser did not become ready. Inspect journalctl --user -u dev-tools-shared-browser and the configured Chrome host service, then rerun.' >&2
+    fi
+    exit 1
+}
+echo "Installed and ready locally. Publish the dedicated Tailscale Serve port 8443 for viewer access."

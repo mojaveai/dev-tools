@@ -1,6 +1,6 @@
 # Shared browser installation and agent use
 
-The default on procbox and demobox is `shared_browser_repl`, replacing the
+The default Linux installation uses `shared_browser_repl`, replacing the
 Mac Chrome SSH relay and noVNC agent workflow. Both Codex and Claude Code receive
 stdio MCP registration and the shared-browser skill. Reconnect MCP or start a
 new agent session after installation; existing sessions retain old tool lists.
@@ -51,9 +51,17 @@ to refresh descriptions from an older installation.
 
 ## Install or update
 
-Prerequisites: Linux user systemd, Python 3.11+, Node 22+, npm, sandbox-capable
-Chromium, Tailscale, Xvfb and flock (Ubuntu packages `xvfb` and `util-linux`). The legacy `--with-browser` provisioner can install Chromium
-and its dependencies; the shared runtime does not use its VNC server.
+Run the normal bootstrap or `./provision.sh --only mod_shared_browser` to install
+and update the default browser. The provisioner installs missing dependencies,
+checks Chromium's sandbox, starts the services, verifies browser RPC readiness,
+and publishes port 8443 only when it is free or already belongs to this browser.
+Other Serve routes are preserved. Use `--skip mod_shared_browser` to omit it.
+
+Prerequisites for the standalone runtime installer: Linux, Python 3.11+, Node
+22+, npm, sandbox-capable Chromium, Tailscale, Xvfb and flock. Hosts with a user
+systemd manager use it; containers without one require the `supervisor` package.
+The provisioner supplies a private checksum-verified Node 24 LTS build when the
+system Node is too old. The shared runtime does not use VNC.
 
 From a persistent dev-tools checkout:
 
@@ -67,7 +75,7 @@ tailscale serve --bg --https=8443 http://127.0.0.1:8791
 bin/dev-tools shared-browser status
 ```
 
-The installer infers the HTTPS hostname from this machine's Tailscale DNS name,
+The standalone installer infers the HTTPS hostname from this machine's Tailscale DNS name,
 installs dependencies/builds assets, enables the persistent service, configures
 both agent CLIs, and disables the old native-registration repair service. It
 preserves unrelated agent settings. The default `native` engine runs normal
@@ -85,6 +93,32 @@ Do not replace an occupied 8443 listener. Do not reset Serve configuration or
 broaden ACLs. Tailscale policy must allow the intended user to reach that port.
 Existing noVNC routes and profiles are retained for explicit fallback; no active
 legacy sessions are killed by installation.
+
+### Coder pods without systemd
+
+The provisioner installs a private Supervisor instance with a mode-0700 Unix
+control socket. Chrome and the receiver run as separate supervised processes;
+an installer rerun restarts only the receiver when the Chrome configuration is
+unchanged. The supervisor automatically restarts crashed processes and rotates
+its logs. A third process restores a missing shared-browser MCP registration
+after a workspace template rewrites Codex configuration, preserving user overrides.
+
+The managed Bash startup block and the first MCP call start existing services
+after a pod restart. `dev-tools shared-browser start` also starts them explicitly.
+Services survive an SSH disconnect. A full pod restart necessarily closes live
+pages; the browser profile remains on the user's persistent volume.
+
+Logs and `supervisor.conf` live in the selected browser state directory (normally
+`~/.local/state/dev-tools/shared-browser`). Inspect `chrome.log`, `receiver.log`,
+`registration.log`, and `supervisor.log` if startup fails. For process status:
+
+```sh
+supervisorctl -c ~/.local/state/dev-tools/shared-browser/supervisor.conf status
+dev-tools shared-browser status
+```
+
+See [Supervisor's configuration reference](https://supervisord.org/configuration.html)
+for the process and private Unix-socket settings used by this backend.
 
 On the two installed hosts runtime code is in
 `~/.local/share/dev-tools-shared-browser`, separate from the dev-tools checkout.

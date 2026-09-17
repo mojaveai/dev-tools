@@ -15,15 +15,18 @@ Codex sessions keep running; restart them when ready to load a changed keymap.
 curl -fsSL https://raw.githubusercontent.com/mojaveai/dev-tools/main/bootstrap.sh | sh
 ```
 
-The recommended browser workflow is **shared remote Chrome**, with simultaneous
+The default Linux browser is **shared remote Chrome**, with simultaneous
 agent/human interaction and a private DOM viewer that works on computers and
-phones. It replaces the Mac SSH relay and noVNC workflow on procbox and demobox.
+phones. It replaces the Mac SSH relay and noVNC agent workflow.
 See [installation and agent invocation](docs/shared-browser-install.md).
 
-The general bootstrap still provides the legacy native routing and optional
-`--with-browser` Chromium/noVNC dependencies on fresh hosts. Install the shared
-runtime afterward using the guide above. Once installed, provisioning preserves
-its MCP default. Existing browser profiles and authentication are retained.
+Bootstrap installs its dependencies, starts Chrome and the receiver, registers
+`shared_browser_repl`, and publishes the dedicated private Tailscale viewer.
+Linux hosts use user systemd; Coder pods without it use private Supervisor
+services that recover on shell entry or first MCP use after a pod restart.
+Installer reruns preserve Chrome, open tabs, and authentication. Use
+`--skip mod_shared_browser` to omit it. The old desktop route and noVNC viewer
+remain explicit compatibility options.
 
 Nothing to paste, no secret to carry, nothing self-hosted. A new machine asks you
 to approve two links — Tailscale, then Proton Pass — and does the rest itself.
@@ -181,7 +184,8 @@ appended twice, and removals propagate.
 ./provision.sh --skip "mod_g2"                 # all but this
 ./provision.sh --non-interactive               # never prompt
 ./provision.sh --list                          # step names
-./provision.sh --with-browser                  # pilot: native browser + live viewer
+./provision.sh --only mod_shared_browser       # install/update the default shared browser
+./provision.sh --with-browser                  # also install the legacy noVNC viewer
 ./provision.sh --with-browser --viewer-policy-reviewed  # reviewed tailnet; automatic publication
 ./provision.sh --only mod_native_browser       # migrate legacy MCPs to native routing
 ```
@@ -213,6 +217,12 @@ identity, password or TOTP is written into shell configuration. The default only
 reads `pass://codex/ChatGPT/email`; Password and TOTP are not needed for this check.
 Identity verification currently covers Codex; it does not certify the accounts
 used by other installed services.
+
+The account probe selects OpenAI only inside its temporary verification process.
+Custom Coder model providers can otherwise hide an existing ChatGPT login from
+the account API. Your configured model route is preserved. Network failures or
+an ambiguous HTTP 401 are reported as unverified rather than prompting another
+login; explicit revoked/expired credential errors can trigger recovery.
 
 The [official Codex authentication flow](https://learn.chatgpt.com/docs/auth.md)
 supports browser/device approval, not direct password/TOTP CLI login. Enable

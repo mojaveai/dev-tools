@@ -67,7 +67,7 @@ class AccountTests(unittest.TestCase):
             fake = Path(temp) / "codex"
             fake.write_text("""#!/usr/bin/env python3
 import json, sys
-assert sys.argv[1:] == ['app-server', '--listen', 'stdio://']
+assert sys.argv[1:] == ['app-server', '-c', 'model_provider="openai"', '--listen', 'stdio://']
 a = json.loads(input()); assert a['method'] == 'initialize'
 print(json.dumps({'id': a['id'], 'result': {}}), flush=True)
 assert json.loads(input())['method'] == 'initialized'
@@ -108,6 +108,12 @@ codex() {
 }
 codex_account_check() { return "$TEST_ACCOUNT_RESULT"; }
 node() { echo "unexpected credential login" >&2; exit 99; }
+python3() {
+    case "$1" in
+        */auth/reconcile_server.py) return 0 ;;
+        *) command python3 "$@" ;;
+    esac
+}
 mod_codex
 """
         with tempfile.TemporaryDirectory() as temp:

@@ -2,7 +2,9 @@
 # Native CUA routing is independent of the optional Linux viewer packages.
 mod_native_browser() {
     if [ -x "$HOME/.local/bin/dev-tools-shared-browser" ]; then
-        python3 "$REPO_DIR/shared_browser/repair.py" --node "$(command -v node)" || return 1
+        set --
+        systemctl --user show-environment >/dev/null 2>&1 || set -- --once
+        python3 "$REPO_DIR/shared_browser/repair.py" "$@" --node "$(command -v node)" || return 1
         note "shared_browser_repl registration repair enabled; leaving native routing retired"
         return "$RC_OK"
     fi
@@ -15,6 +17,16 @@ mod_native_browser() {
     if [ "$(readlink "$BIN_DIR/dev-tools" 2>/dev/null || true)" != "$REPO_DIR/bin/dev-tools" ]; then
         ln -sfn "$REPO_DIR/bin/dev-tools" "$BIN_DIR/dev-tools" || return 1
         _native_changed=1
+    fi
+    # A router registration is not a browser installation. Fresh Linux pods
+    # often have neither a desktop plugin nor a forwarded Mac runtime.
+    set -- --check
+    if [ -n "${DEVTOOLS_NATIVE_BROWSER_SOCKET:-}" ]; then
+        set -- "$@" --socket "$DEVTOOLS_NATIVE_BROWSER_SOCKET"
+    fi
+    if ! python3 "$REPO_DIR/native_browser/router.py" "$@"; then
+        note "no connected native browser; install a host browser with 'dev-tools shared-browser install' (see docs/shared-browser-install.md), or connect the desktop runtime and rerun"
+        return "$RC_SKIP"
     fi
     if [ -n "${DEVTOOLS_NATIVE_BROWSER_SOCKET:-}" ]; then
         python3 "$REPO_DIR/native_browser/configure.py" "$REPO_DIR" --socket "$DEVTOOLS_NATIVE_BROWSER_SOCKET"

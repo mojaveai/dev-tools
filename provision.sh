@@ -109,7 +109,7 @@ Usage: provision.sh [options]
   --skip  "fn ..."   skip these step functions
   --list             list step functions and exit
   --non-interactive  no terminal prompts (opted-in browser login still runs)
-  --with-browser     install native shareable browser sessions (pilot)
+  --with-browser     also install the legacy noVNC viewer (shared browser is default)
   --with-codex-login  enable saved Proton Pass browser-assisted Codex recovery
   --viewer-policy-reviewed  acknowledge tailnet viewer access review; save once
   --native-browser-socket PATH  override the Mac relay UNIX socket
@@ -118,7 +118,7 @@ Usage: provision.sh [options]
 
 Steps: mod_base mod_mosh mod_tmux mod_tailscale mod_passcli mod_secrets
        mod_shell mod_github mod_claude mod_codex mod_skills mod_sshid
-       mod_uv mod_ripgrep mod_g2 mod_browser mod_native_browser
+       mod_uv mod_ripgrep mod_g2 mod_browser mod_native_browser mod_shared_browser
        mod_keymaps mod_desktop_shell
 
 macOS: install Homebrew first. Default desktop setup configures tools, keymaps,
@@ -160,8 +160,15 @@ step "secrets"         mod_secrets
 step "shell env"       mod_shell
 step "github cli"      mod_github
 step "claude code"     mod_claude
-step "native browser"  mod_native_browser
-step "browser viewer"  mod_browser
+step "shared browser"  mod_shared_browser
+# Native desktop routing is an explicit compatibility option. Never run its
+# migration by default before the shared-browser registration.
+case " $ONLY " in *' mod_native_browser '*) step "native browser" mod_native_browser ;; esac
+if [ "${DEVTOOLS_BROWSER_ENABLED:-0}" = 1 ]; then
+    step "legacy browser viewer" mod_browser
+else
+    case " $ONLY " in *' mod_browser '*) step "legacy browser viewer" mod_browser ;; esac
+fi
 step "codex"           mod_codex
 step "keymaps"         mod_keymaps
 step "desktop shell"   mod_desktop_shell

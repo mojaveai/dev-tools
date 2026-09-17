@@ -1,7 +1,9 @@
 import http from "node:http";
 import path from "node:path";
 import {browserSettings} from './settings.mjs';
+import {ensureServices} from './services.mjs';
 export async function rpc(method, data = {}) {
+  await ensureServices();
   const socketPath = path.join((await browserSettings()).stateDir,"server.sock");
   return new Promise((resolve, reject) => {
     const req = http.request(

@@ -40,16 +40,18 @@ class AccountRequestError(RuntimeError):
                 "refresh_token_reused",
                 "refresh_token_expired",
                 "invalid_grant",
-                "unauthorized",
-                "401",
             )
         )
+        self.may_need_refresh = self.requires_login or "unauthorized" in text or "401" in text
 
 
 def read_account(timeout=30, expected=None):
     """Use Codex's supported credential-store-independent account/read API."""
     process = subprocess.Popen(
-        ["codex", "app-server", "--listen", "stdio://"],
+        # Coder/custom providers may set requires_openai_auth=false. In that
+        # mode account/read returns null even with valid stored ChatGPT auth.
+        # Override only this disposable process, never the user's model route.
+        ["codex", "app-server", "-c", 'model_provider="openai"', "--listen", "stdio://"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -115,7 +117,7 @@ def read_account(timeout=30, expected=None):
             try:
                 response(3)
             except AccountRequestError as exc:
-                if not exc.requires_login:
+                if not exc.may_need_refresh:
                     raise  # Network/service errors never trigger a new login.
                 send(
                     {

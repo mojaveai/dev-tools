@@ -121,6 +121,13 @@ startup_timeout_sec = 99
         self.assertTrue(any(call.args[0]==['systemctl','--user','enable',repair.UNIT+'.service'] for call in run.call_args_list))
 
 class RoutingTests(unittest.TestCase):
+    def test_check_exit_status_matches_discovered_route(self):
+        for route, status in [(None, 1), ('local', 0)]:
+            with patch('session_router.SessionRouter.health', return_value={'route':route}), \
+                 patch.object(sys, 'argv', ['router.py', '--check']), \
+                 patch.object(r.signal, 'signal'), patch('sys.stdout', new_callable=io.StringIO):
+                self.assertEqual(r.main(), status)
+
     def fake_peer(self,path,browsers=None,stall=False):
         server=socket.socket(socket.AF_UNIX);server.bind(path);server.listen()
         def serve():

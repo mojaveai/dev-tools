@@ -22,6 +22,7 @@ class LiveAuthTests(unittest.TestCase):
             ("refreshable", 0, 1),
             ("revoked", 2, 1),
             ("offline", 4, 0),
+            ("unauthorized", 4, 1),
             ("wrong", 3, 0),
         ]:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temp:
@@ -41,6 +42,7 @@ for line in sys.stdin:
   checks+=1
   if scenario=='revoked' or scenario=='refreshable' and checks==1:error={'code':-32000,'message':'HTTP 401 token_revoked'}
   elif scenario=='offline':error={'code':-32000,'message':'network timeout'}
+  elif scenario=='unauthorized':error={'code':-32000,'message':'HTTP 401 Unauthorized'}
  print(json.dumps({'id':r['id'],**({'error':error} if error else {'result':result})}),flush=True)
 """)
                 fake.chmod(0o755)

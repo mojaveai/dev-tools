@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tomllib
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'native_browser'))
 from configure import atomic_write, rewrite
@@ -56,6 +57,7 @@ def install(repo, config, server, units):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--once', action='store_true')
+    p.add_argument('--watch', action='store_true', help='Periodic repair for supervised containers')
     p.add_argument('--config', type=Path, default=Path(os.environ.get('CODEX_HOME', str(Path.home()/'.codex')))/'config.toml')
     p.add_argument('--server', help='Explicit MCP launch configuration for remote deployments')
     p.add_argument('--runtime', type=Path, default=Path.home()/'.local/share/dev-tools-shared-browser')
@@ -64,7 +66,14 @@ def main():
     server = json.loads(a.server) if a.server else dict(command=a.node, args=[str(a.runtime/'mcp.mjs')], startup_timeout_sec=30, tool_timeout_sec=120)
     if not a.server and not (a.runtime/'mcp.mjs').is_file():
         p.error('Shared browser runtime is not installed')
-    if a.once:
+    if a.watch:
+        while True:
+            try:
+                repair(a.config, server)
+            except (OSError, ValueError) as exc:
+                print(f'Shared browser registration repair deferred: {type(exc).__name__}', flush=True)
+            time.sleep(30)
+    elif a.once:
         if repair(a.config, server):
             print('Restored shared_browser_repl; reconnect existing MCP sessions.')
     else:
