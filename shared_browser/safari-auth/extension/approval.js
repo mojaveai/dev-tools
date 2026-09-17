@@ -2,7 +2,7 @@
   if (window.top !== window) return;
   let result;
   for (let attempt=0; attempt<10; attempt++) {
-    result = await browser.runtime.sendMessage({type:'ready'});
+    result = await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'ready'});
     if (result?.request) break;
     await new Promise(resolve => setTimeout(resolve,200));
   }
@@ -26,12 +26,12 @@
   const timer=setTimeout(()=>{controller.abort();approve.disabled=true;status.textContent='Request expired. Start a new request in the shared browser.';},Math.max(1,request.expiresAt-Date.now()));
   cancel.onclick=async()=>{
     controller.abort();approve.disabled=true;clearTimeout(timer);finished=true;
-    const r=await browser.runtime.sendMessage({type:'cancel',id:request.id});
+    const r=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'cancel',id:request.id});
     cancel.disabled=true;status.textContent=r?.error || 'Canceled. You can close this tab.';
   };
   const poll=setInterval(async()=>{
     if(finished){clearInterval(poll);return;}
-    const r=await browser.runtime.sendMessage({type:'ready'}).catch(()=>({error:'Connection lost'}));
+    const r=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'ready'}).catch(()=>({error:'Connection lost'}));
     if(finished)return;
     if(!r || r.error){controller.abort();approve.disabled=true;clearInterval(poll);clearTimeout(timer);status.textContent='Request ended or connection lost. Start a new request.';}
   },1500);
@@ -51,7 +51,7 @@
         ? PublicKeyCredential.parseCreationOptionsFromJSON(request.publicKey)
         : PublicKeyCredential.parseRequestOptionsFromJSON(request.publicKey);
       const credential=await navigator.credentials[request.kind]({publicKey,signal:controller.signal});
-      const r=await browser.runtime.sendMessage({type:'complete',id:request.id,response:credential.toJSON()});
+      const r=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'complete',id:request.id,response:credential.toJSON()});
       if(!r || r.error)throw Error(r?.error || 'Connection lost. Check the shared browser before retrying.');
       finished=true;clearTimeout(timer);clearInterval(poll);
       cancel.disabled=true;

@@ -5,7 +5,7 @@ async function refresh() {
     // its listeners start. Retry read-only discovery, never approval submission.
     let result;
     for(let attempt=0;attempt<3;attempt++){
-      result=await browser.runtime.sendMessage({type:'list'});
+      result=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'list'});
       if(result)break;
       await new Promise(resolve=>setTimeout(resolve,200));
     }
@@ -18,7 +18,7 @@ async function refresh() {
       button.textContent = `${request.kind === 'create' ? 'Create test passkey' : 'Sign in'} · ${request.origin} · ${request.id.slice(0,8)}`;
       button.onclick = async () => {
         button.disabled = true;
-        const r = await browser.runtime.sendMessage({type:'open',id:request.id});
+        const r = await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'open',id:request.id});
         if (!r || r.error) {list.textContent=r?.error || 'The extension restarted. Refresh to check your request.';return;}
         window.close();
       };
@@ -33,7 +33,7 @@ if(AUTH_CONFIG.mobile){
   document.querySelector('#pair').onclick=async()=>{
     const field=document.querySelector('#pair-token');
     const token=field.value.trim();field.value='';
-    const result=await browser.runtime.sendMessage({type:'pair',token}).catch(error=>({error:error.message}));
+    const result=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'pair',token}).catch(error=>({error:error.message}));
     document.querySelector('#pair-status').textContent=result?.paired?'Paired. You can approve from the viewer.':result?.error||'Pairing failed';
     if(result?.paired)await refresh();
   };

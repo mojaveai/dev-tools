@@ -1,5 +1,5 @@
 /* The generated config contains a disposable relay capability, never a passkey. */
-const api = browser;
+const api = globalThis.browser || globalThis.chrome;
 async function relay(path, body) {
   const token = AUTH_CONFIG.mobile ? (await api.storage.local.get('mobileToken')).mobileToken : AUTH_CONFIG.token;
   if(!token)throw Error('Pair this iPhone in Dev Tools Auth first.');
@@ -25,7 +25,7 @@ async function returnToViewer(binding) {
   if (tab?.url && new URL(tab.url).origin === binding.request.origin)
     await api.tabs.update(binding.tabId, {url:url.href, active:true});
 }
-api.runtime.onMessage.addListener(async (message, sender) => {
+async function handleMessage(message, sender) {
   try {
     // Only the extension popup may discover requests or create approval tabs.
     const fromPopup = sender.url === api.runtime.getURL('popup.html');
@@ -74,6 +74,12 @@ api.runtime.onMessage.addListener(async (message, sender) => {
     }
     throw Error('Unknown operation');
   } catch (error) { return {error: error.message}; }
+}
+// Chrome versions differ in Promise listener support; keep the response channel open.
+if (globalThis.browser) api.runtime.onMessage.addListener(handleMessage);
+else api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  handleMessage(message, sender).then(sendResponse, error => sendResponse({error:error.message}));
+  return true;
 });
 api.tabs.onRemoved.addListener(async tabId => {
   const {binding} = await api.storage.local.get('binding');

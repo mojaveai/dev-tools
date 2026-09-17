@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await fs.readFile(new URL('../extension/background.js',import.meta.url),'utf8');
-async function setup({mobile=false,sites}={}){
+async function setup({mobile=false,sites,chrome=false}={}){
   let listener, state={},calls=[],tabCalls=[];
   const request={id:'request',origin:'http://localhost:8812',kind:'get',publicKey:{challenge:'challenge'},expiresAt:Date.now()+120000};
   const browser={runtime:{getURL:p=>'safari-web-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}},storage:{local:{get:async()=>state,set:async value=>Object.assign(state,value),remove:async key=>delete state[key]}},tabs:{create:async()=>{tabCalls.push(['create']);return {id:42};},get:async id=>({id,url:state.tabURL||request.origin}),update:async(...args)=>{tabCalls.push(['update',...args]);if(args[1].url)state.tabURL=args[1].url;},remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}}}};
-  vm.runInNewContext(source,{browser,URL,AbortSignal,AUTH_CONFIG:{mobile,sites,site:request.origin,relay:'http://localhost:8811',token:'test-capability'},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?[request]:{delivered:true}};}});
-  return {send:(message,sender)=>listener(message,sender),calls,request,tabCalls};
+  vm.runInNewContext(source,{...(chrome?{chrome:browser}:{browser}),URL,AbortSignal,AUTH_CONFIG:{mobile,sites,site:request.origin,relay:'http://localhost:8811',token:'test-capability'},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?[request]:{delivered:true}};}});
+  return {send:(message,sender)=>chrome?new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);}):listener(message,sender),calls,request,tabCalls};
 }
 const popup={url:'safari-web-extension://test/popup.html'};
 test('web content cannot list requests or open approval tabs',async()=>{const app=await setup();for(const type of ['list','open'])assert.ok((await app.send({type,id:'request'},{url:'http://localhost:8812',frameId:0,tab:{id:1}})).error);assert.equal(app.calls.length,0);});
@@ -68,3 +68,14 @@ test('extension accepts listed sites and rejects an unlisted request',async()=>{
  assert.match((await blocked.send({type:'open',id:'request'},popup)).error,/not enabled/);
  assert.equal(blocked.tabCalls.length,0);
 });
+
+ test('Chrome callback messaging preserves same-tab approval and return',async()=>{
+ const app=await setup({chrome:true});
+ assert.ok((await app.send({type:'list'},popup)).requests);
+ assert.equal((await app.send({type:'viewer-open',code:'REQUEST',origin:app.request.origin},viewer)).opened,true);
+ const sender={url:app.request.origin+'/',frameId:0,tab:{id:7}};
+ assert.equal((await app.send({type:'ready'},sender)).autoStart,true);
+ assert.equal((await app.send({type:'complete',id:app.request.id,response:{}},sender)).delivered,true);
+ assert.equal(app.tabCalls.at(-1)[2].url,viewer.url);
+ assert.ok((await app.send({type:'list'},sender)).error);
+ });

@@ -11,7 +11,7 @@
         // Synthetic page events must not open authentication prompts.
         if (!event.isTrusted) return;
         button.disabled = true;
-        const response = await browser.runtime.sendMessage({type:'viewer-open',
+        const response = await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'viewer-open',
           code:button.dataset.devtoolsAuthCode, origin:button.dataset.authOrigin}).catch(error => ({error:error.message}));
         if (!response?.opened) {
           button.disabled = false;
