@@ -41,11 +41,11 @@ export class ViewerPasskeys {
         this.panel.append(row);continue;
       }
       const url = new URL(request.url);
-      if (url.origin !== 'https://procbox.agent-trace.ts.net:23581' || url.pathname !== '/_shared-browser-passkey/') continue;
+      if (!['https://procbox.agent-trace.ts.net:23581','https://procbox.agent-trace.ts.net:3581'].includes(url.origin) || url.pathname !== '/_shared-browser-passkey/') continue;
       const row = document.createElement('div');
       row.style.cssText = 'padding:12px;border:1px solid #a4c9e9;border-radius:10px;background:#eef7ff;display:flex;align-items:center;gap:12px;flex-wrap:wrap';
       const text = document.createElement('span');
-      text.textContent = 'Passkey requested · Agent Trace QA · '+request.code;
+      text.textContent = 'Passkey requested · Agent Trace '+(url.port==='3581'?'canonical dev':'QA')+' · '+request.code;
       const link = document.createElement('a');
       link.textContent = 'Open separate approval window';
       url.searchParams.set('auto','1');

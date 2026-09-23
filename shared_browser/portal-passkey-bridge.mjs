@@ -1,3 +1,4 @@
+import {portalProfile,portalHook,canonicalBrowserConnection} from './portal-passkey-profile.mjs';
 import http from 'node:http';
 import {approvalOriginAllowed} from './portal-passkey-origin.mjs';
 import fs from 'node:fs/promises';
@@ -7,10 +8,11 @@ import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
 import {browserConnection} from './browser-endpoint.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
-const origin=process.env.PORTAL_ORIGIN || 'https://procbox.agent-trace.ts.net:23581', prefix='/_shared-browser-passkey';
+if(process.argv[2]==='--check-bundle'){for(const file of ['portal-passkey-hook.js','dist/portal-passkey.html','dist/portal-passkey-client.js'])await fs.access(path.join(root,file));console.log('Canonical adapter bundle imports and assets verified');process.exit(0);}
+const {origin,names,edgeIdentity,port}=portalProfile(process.env), prefix='/_shared-browser-passkey';
 const viewerOrigin=new URL(process.env.PORTAL_VIEWER_ORIGIN || 'https://procbox.agent-trace.ts.net:8443').origin;
 const requests=new Map(),attached=new WeakSet();
-const hook=(await fs.readFile(path.join(root,'portal-passkey-hook.js'),'utf8')).replaceAll('https://procbox.agent-trace.ts.net:23581',new URL(origin).origin);
+const hook=portalHook(await fs.readFile(path.join(root,'portal-passkey-hook.js'),'utf8'),{origin,names});
 const code=id=>id.slice(0,8).toUpperCase();
 const json=(res,body,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(body));};
 function cancel(r,message='Request canceled'){if(r.status==='pending'){r.status='canceled';r.resolve({error:message});}}
@@ -19,8 +21,8 @@ async function attach(page){
  if(attached.has(page))return;attached.add(page);
  const cancelAll=()=>{for(const r of requests.values())if(r.page===page)cancel(r,'Page changed or closed');};
  page.on('framenavigated',frame=>{if(frame===page.mainFrame())cancelAll();});page.on('close',cancelAll);
- for(const name of ['__portalPasskeyStart','__portalPasskeyWait','__portalPasskeyCancel'])await page.removeExposedFunction(name).catch(()=>{});
- await page.exposeFunction('__portalPasskeyStart',publicKey=>{
+ for(const name of [names+'Start',names+'Wait',names+'Cancel'])await page.removeExposedFunction(name).catch(()=>{});
+ await page.exposeFunction(names+'Start',publicKey=>{
    if(new URL(page.url()).origin!==origin || (publicKey.rpId && publicKey.rpId!==new URL(origin).hostname))throw Error('Unsupported passkey origin');
    if(typeof publicKey.challenge!=='string'||publicKey.challenge.length>4096)throw Error('Invalid challenge');
    cancelAll();
@@ -32,15 +34,15 @@ async function attach(page){
    requests.set(id,r);const timer=setTimeout(()=>cancel(r,'Passkey request expired'),120000);timer.unref();
    return id;
  });
- await page.exposeFunction('__portalPasskeyWait',async id=>{const r=requests.get(id);if(!r||r.page!==page)throw Error('Unknown request');return r.promise;});
- await page.exposeFunction('__portalPasskeyCancel',id=>{const r=requests.get(id);if(r?.page===page)cancel(r);});
+ await page.exposeFunction(names+'Wait',async id=>{const r=requests.get(id);if(!r||r.page!==page)throw Error('Unknown request');return r.promise;});
+ await page.exposeFunction(names+'Cancel',id=>{const r=requests.get(id);if(r?.page===page)cancel(r);});
  await page.evaluateOnNewDocument(hook);await page.evaluate(hook).catch(()=>{});
 }
 const server=http.createServer(async(req,res)=>{
  try{
    const u=new URL(req.url,'http://local');
    if(u.pathname==='/agent/state'&&req.method==='GET')return json(res,[...requests.values()].filter(r=>r.status==='pending').map(r=>({code:code(r.id),url:origin+prefix+'/?request='+r.id,expiresAt:r.expiresAt})));
-   if(req.headers['x-shared-browser-edge']!=='qa-dashboard')return json(res,{error:'Use the development portal URL'},403);
+   if(req.headers['x-shared-browser-edge']!==edgeIdentity)return json(res,{error:'Use the development portal URL'},403);
    const files={[prefix+'/']:['portal-passkey.html','text/html'],[prefix+'/client.js']:['portal-passkey-client.js','text/javascript']};
    if(req.method==='GET'&&files[u.pathname]){
      const [name,type]=files[u.pathname];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors "+viewerOrigin+"; base-uri 'none'",'X-Content-Type-Options':'nosniff'});return res.end(await fs.readFile(path.join(root,'dist',name)));
@@ -64,13 +66,13 @@ const server=http.createServer(async(req,res)=>{
    r.status='delivered';r.resolve(response);return json(res,{delivered:true});
  }catch(error){json(res,{error:error.message},400);}
 });
-server.listen(Number(process.env.PORTAL_BRIDGE_PORT || 8797),'127.0.0.1');
+server.listen(port,'127.0.0.1');
 let browser;
 while(true){
  try{
-   const connection=await browserConnection({
-     endpoint:process.env.PORTAL_BROWSER_WS,
-   });
+   const connection=process.env.PORTAL_PROFILE==='canonical-dev'
+     ? await canonicalBrowserConnection()
+     : await browserConnection({endpoint:process.env.PORTAL_BROWSER_WS});
    browser=await puppeteer.connect({...connection,defaultViewport:null});
    browser.on('targetcreated',async target=>{try{if(target.type()==='page'){const p=await target.page();if(p)await attach(p);}}catch(e){console.error('Passkey hook attach failed:',e.message);}});
    for(const page of await browser.pages())await attach(page);
