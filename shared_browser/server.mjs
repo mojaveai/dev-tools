@@ -545,7 +545,7 @@ const httpServer = http.createServer(async (req, res) => {
       return stream.pipe(res);
     }
     if (url.pathname === '/passkey-requests') {
-      const feeds=['http://127.0.0.1:8797/agent/state','http://localhost:8811/agent/state'];
+      const feeds=['http://127.0.0.1:8797/agent/state','http://127.0.0.1:8798/agent/state','http://localhost:8811/agent/state'];
       const lists=await Promise.all(feeds.map(async endpoint=>{try{
         const response=await fetch(endpoint,{signal:AbortSignal.timeout(1000)});
         if(!response.ok)throw Error('Passkey broker unavailable');
@@ -594,7 +594,7 @@ const httpServer = http.createServer(async (req, res) => {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob: https://procbox.agent-trace.ts.net:23581; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob: https://procbox.agent-trace.ts.net:23581 https://procbox.agent-trace.ts.net:3581; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     });
     res.end(zipped ? gzipSync(payload) : payload);
   } catch (err) {

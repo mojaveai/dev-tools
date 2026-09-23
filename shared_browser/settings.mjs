@@ -22,7 +22,7 @@ export async function browserSettings({env=process.env,home=os.homedir()}={}) {
   return {stateDir,chrome,hostService};
 }
 
-if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+if(process.argv[1] && path.basename(process.argv[1])==='settings.mjs' && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const settings=await browserSettings();
   if(!(process.argv[2] in settings))throw Error('Use stateDir, chrome, or hostService');
   console.log(settings[process.argv[2]]);
