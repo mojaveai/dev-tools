@@ -6,8 +6,9 @@ import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
-import {browserConnection} from './browser-endpoint.mjs';
+import {browserConnection,loopbackEndpoint} from './browser-endpoint.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
+if(process.argv[2]==='--check-browser-bundle'){const browser=await puppeteer.connect({browserWSEndpoint:loopbackEndpoint(process.argv[3]),defaultViewport:null});try{const page=await browser.newPage();try{await page.exposeFunction('__canonicalFixture',v=>v);if(await page.evaluate(()=>globalThis.__canonicalFixture('fixture'))!=='fixture')throw Error('Fixture bridge failed');}finally{await page.close();}}finally{browser.disconnect();}console.log('Canonical bundled browser connection verified');process.exit(0);}
 if(process.argv[2]==='--check-bundle'){for(const file of ['portal-passkey-hook.js','dist/portal-passkey.html','dist/portal-passkey-client.js'])await fs.access(path.join(root,file));console.log('Canonical adapter bundle imports and assets verified');process.exit(0);}
 const {origin,names,edgeIdentity,port}=portalProfile(process.env), prefix='/_shared-browser-passkey';
 const viewerOrigin=new URL(process.env.PORTAL_VIEWER_ORIGIN || 'https://procbox.agent-trace.ts.net:8443').origin;

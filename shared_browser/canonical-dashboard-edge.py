@@ -50,7 +50,7 @@ def body_length(headers, helper):
     if lengths and not re.fullmatch(r'[0-9]+', lengths[0]):
         raise ValueError('invalid content length')
     size = int(lengths[0]) if lengths else 0
-    if size < 0 or size > (100000 if helper else 32 * 1024 * 1024):
+    if size < 0 or size > (100000 if helper else 256000000):
         raise ValueError('request size exceeded')
     return size
 
@@ -58,6 +58,20 @@ def body_length(headers, helper):
 def verify_pin(der):
     if hashlib.sha256(der).hexdigest() != PIN:
         raise ValueError('canonical backend certificate pin mismatch')
+
+
+class LimitedBody:
+    """Stream exactly Content-Length bytes, never the next request."""
+    def __init__(self, source, remaining):
+        self.source, self.remaining = source, remaining
+    def read(self, size=65536):
+        if not self.remaining:
+            return b''
+        data = self.source.read(min(size, 65536, self.remaining))
+        if not data:
+            raise ValueError('incomplete request body')
+        self.remaining -= len(data)
+        return data
 
 
 class Server(ThreadingHTTPServer):
@@ -106,8 +120,8 @@ class Handler(BaseHTTPRequestHandler):
             if helper and self.command not in ('GET', 'POST'):
                 raise PermissionError('unsupported helper method')
             size = body_length(self.headers, helper)
-            body = self.rfile.read(size)
-            if len(body) != size:
+            body = self.rfile.read(size) if helper else LimitedBody(self.rfile, size)
+            if helper and len(body) != size:
                 raise ValueError('incomplete request body')
             removed = HOP | {h.strip().lower() for h in self.headers.get('Connection', '').split(',')}
             headers = {k: v for k, v in self.headers.items()
@@ -123,23 +137,34 @@ class Handler(BaseHTTPRequestHandler):
                 verify_pin(upstream.sock.getpeercert(binary_form=True))
             upstream.request(self.command, self.path, body=body, headers=headers)
             response = upstream.getresponse()
-            limit = 500000 if helper else 32 * 1024 * 1024
-            data = response.read(limit + 1)
-            if len(data) > limit:
-                raise ValueError('upstream response too large')
+            if not helper and body.remaining:
+                raise ValueError('incomplete upstream request')
+            data = response.read(500001) if helper else None
+            if helper and len(data) > 500000:
+                raise ValueError('helper response too large')
+            content_length = response.getheader('Content-Length')
+            if content_length is not None and not re.fullmatch(r'[0-9]+', content_length):
+                raise ValueError('invalid upstream content length')
+            if helper and self.command != 'HEAD':
+                content_length = str(len(data))
             self.send_response(response.status)
             sent = True
             removed = HOP | {h.strip().lower() for h in response.getheader('Connection', '').split(',')}
             for key, value in response.getheaders():
                 if key.lower() not in removed:
                     self.send_header(key, value)
-            content_length = response.getheader('Content-Length') if self.command == 'HEAD' else str(len(data))
             if content_length is not None:
-                if not re.fullmatch(r'[0-9]+', content_length):
-                    raise ValueError('invalid upstream content length')
                 self.send_header('Content-Length', content_length)
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != 'HEAD':
+                if helper:
+                    self.wfile.write(data)
+                else:
+                    while True:
+                        chunk = response.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
         except Exception as error:
             if not sent:
                 data = b'{"error":"Canonical dev edge unavailable"}'

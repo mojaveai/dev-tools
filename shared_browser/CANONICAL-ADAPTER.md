@@ -75,6 +75,7 @@ Tests cover exact Host/tailnet admission, request framing, original body/Origin
 and duplicate cookies, backend pin rejection, and independent canonical/QA
 namespaces. Bundle import validation makes no network connection. These tests do
 not substitute for deployed public TLS verification and actual user WebAuthn.
-The edge buffers at most 32 MiB per app response and 500 KiB per helper response;
-streams/WebSockets are not supported. Logs deliberately omit request URLs,
+App bodies stream in at most 64 KiB chunks; requests retain the app maximum of
+256 MiB and responses have no smaller edge size limit. Helper responses remain
+bounded to 500 KiB. WebSockets are not supported. Logs deliberately omit request URLs,
 assertions, cookies, and exception bodies.

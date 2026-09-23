@@ -31,18 +31,31 @@ class EdgeTests(unittest.TestCase):
         for value in [{**valid,'upstream':'https://evil'}, {**valid,'allowed_tailnet_user_ids':[True]}, {**valid,'allowed_tailnet_user_ids':[]}]:
             with self.assertRaises(ValueError):e.configuration(value)
 
+    def test_bounded_stream_never_consumes_next_request(self):
+        source=io.BytesIO(b'x'*100000+b'NEXT')
+        stream=e.LimitedBody(source,100000)
+        self.assertEqual(len(stream.read(999999)),65536)
+        self.assertEqual(len(stream.read(999999)),34464)
+        self.assertEqual(stream.read(),b'')
+        self.assertEqual(source.read(),b'NEXT')
+        with self.assertRaises(ValueError):e.LimitedBody(io.BytesIO(b''),1).read()
+
     def test_actual_handler_preserves_body_cookie_and_origin(self):
         body=b'{"response":{"clientDataJSON":"unaltered-base64"}}'
         class Response:
             status=200
-            def read(self,n):return b'{"unchanged":true}'
-            def getheader(self,k,d=''):return d
+            def __init__(self):self.body=io.BytesIO(b'{"unchanged":true}')
+            def read(self,n):return self.body.read(n)
+            def getheader(self,k,d=None):return d
             def getheaders(self):return [('Set-Cookie','session=fixture; Secure; HttpOnly'),('Set-Cookie','csrf=fixture; Secure'),('Content-Type','application/json')]
         class Upstream:
             def __init__(self,*args,**kwargs):self.sock=self
             def connect(self):pass
             def getpeercert(self,**kwargs):return b'fixture'
-            def request(self,*args,**kwargs):calls.append((args,kwargs))
+            def request(self,*args,**kwargs):
+                body=kwargs['body'];parts=[]
+                while chunk:=body.read(8192):parts.append(chunk)
+                calls.append((args,{**kwargs,'body':b''.join(parts)}))
             def getresponse(self):return Response()
             def close(self):pass
         class State:allowed=[42];upstream_tls=object()
