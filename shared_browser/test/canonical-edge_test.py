@@ -41,9 +41,15 @@ class EdgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):e.LimitedBody(io.BytesIO(b''),1).read()
 
     def test_actual_handler_preserves_body_cookie_and_origin(self):
+        self.exercise_handler(False)
+
+    def test_early_backend_rejection_is_preserved_without_replaying_upload(self):
+        self.exercise_handler(True)
+
+    def exercise_handler(self, reject):
         body=b'{"response":{"clientDataJSON":"unaltered-base64"}}'
         class Response:
-            status=200
+            status=413 if reject else 200
             def __init__(self):self.body=io.BytesIO(b'{"unchanged":true}')
             def read(self,n):return self.body.read(n)
             def getheader(self,k,d=None):return d
@@ -51,9 +57,13 @@ class EdgeTests(unittest.TestCase):
         class Upstream:
             def __init__(self,*args,**kwargs):self.sock=self
             def connect(self):pass
+            def settimeout(self,value):pass
             def getpeercert(self,**kwargs):return b'fixture'
             def request(self,*args,**kwargs):
                 body=kwargs['body'];parts=[]
+                if reject:
+                    calls.append((args,kwargs))
+                    raise BrokenPipeError('fixture early rejection')
                 while chunk:=body.read(8192):parts.append(chunk)
                 calls.append((args,{**kwargs,'body':b''.join(parts)}))
             def getresponse(self):return Response()
@@ -71,7 +81,11 @@ class EdgeTests(unittest.TestCase):
         with patch.object(e.subprocess,'check_output',return_value=b'{"UserProfile":{"ID":42}}'),patch.object(e.http.client,'HTTPSConnection',Upstream),patch.object(e,'verify_pin') as pin:
             handler.handle_proxy()
         pin.assert_called_once_with(b'fixture')
-        self.assertEqual(calls[0][1]['body'],body)
+        self.assertEqual(len(calls),1)
+        if reject:
+            self.assertIn(('status',413),headers)
+            self.assertEqual(calls[0][1]['body'].remaining,len(body))
+        else:self.assertEqual(calls[0][1]['body'],body)
         sent=calls[0][1]['headers']
         self.assertEqual(sent['Host'],e.HOST);self.assertEqual(sent['Origin'],'https://'+e.HOST)
         self.assertNotIn('X-Forwarded-For',sent);self.assertNotIn('X-Shared-Browser-Edge',sent)

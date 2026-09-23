@@ -79,3 +79,10 @@ App bodies stream in at most 64 KiB chunks; requests retain the app maximum of
 256 MiB and responses have no smaller edge size limit. Helper responses remain
 bounded to 500 KiB. WebSockets are not supported. Logs deliberately omit request URLs,
 assertions, cookies, and exception bodies.
+
+Certificate renewal: `LoadCredential` captures certificate/key bytes at service
+start. After the existing public certificate renewal updates its source files,
+restart only `dev-tools-canonical-dashboard-edge.service` through the normal
+managed deployment/reconcile path, then run normal public TLS and app assurance.
+No automatic renewal hook for this new unit is claimed. Until restarted it serves
+the previous loaded leaf. Renewal needs no app rebuild or new browser CA trust.

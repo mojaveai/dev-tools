@@ -25,6 +25,8 @@ class TLSFixture(unittest.TestCase):
             class Backend(BaseHTTPRequestHandler):
                 def log_message(self,*_):pass
                 def do_POST(self):
+                    if self.path == '/reject':
+                        self.send_response(413);self.send_header('Content-Length','0');self.end_headers();self.close_connection=True;return
                     remaining=int(self.headers['Content-Length']);digest=hashlib.sha256();total=remaining
                     while remaining:
                         block=self.rfile.read(min(65536,remaining));digest.update(block);remaining-=len(block)
@@ -59,6 +61,10 @@ class TLSFixture(unittest.TestCase):
                     connection=http.client.HTTPSConnection(*edge.server_address,context=client_tls,timeout=10)
                     connection.request('HEAD','/fixture',headers={'Host':e.HOST})
                     response=connection.getresponse();self.assertEqual(response.getheader('Content-Length'),'1234');self.assertEqual(response.read(),b'');connection.close()
+                    connection=http.client.HTTPSConnection(*edge.server_address,context=client_tls,timeout=10)
+                    try:connection.request('POST','/reject',b'x'*1048576,{'Host':e.HOST})
+                    except (BrokenPipeError,ConnectionResetError):pass
+                    response=connection.getresponse();self.assertEqual(response.status,413);response.read();connection.close()
                     with patch.object(e,'PIN','0'*64):
                         connection=http.client.HTTPSConnection(*edge.server_address,context=client_tls,timeout=10)
                         connection.request('HEAD','/fixture',headers={'Host':e.HOST})

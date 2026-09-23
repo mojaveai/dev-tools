@@ -1,6 +1,8 @@
 """Exercise a built bridge against an owned disposable blank Chrome, never shared tabs."""
 import argparse
 import json
+import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
@@ -14,7 +16,7 @@ a=p.parse_args()
 with tempfile.TemporaryDirectory(prefix='canonical-blank-chrome-') as directory:
     root=Path(directory)
     with (root/'chrome.log').open('wb') as log:
-        chrome=subprocess.Popen([a.chrome,'--headless=new','--disable-gpu','--disable-background-networking','--disable-default-apps','--no-first-run','--remote-debugging-port=0','--user-data-dir='+directory,'about:blank'],stdout=log,stderr=log)
+        chrome=subprocess.Popen([a.chrome,'--headless=new','--disable-gpu','--disable-background-networking','--disable-default-apps','--no-first-run','--remote-debugging-port=0','--user-data-dir='+directory,'about:blank'],stdout=log,stderr=log,start_new_session=True)
         try:
             deadline=time.monotonic()+20
             while not (root/'DevToolsActivePort').exists():
@@ -25,6 +27,9 @@ with tempfile.TemporaryDirectory(prefix='canonical-blank-chrome-') as directory:
             subprocess.run([a.node,str(a.bundle/'portal-passkey-bridge.mjs'),'--check-browser-bundle','ws://127.0.0.1:'+port+path],check=True,timeout=20)
             print(json.dumps({'disposable_browser_connection':'passed','shared_browser_contacted':False}))
         finally:
-            chrome.terminate()
+            try:os.killpg(chrome.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
             try:chrome.wait(timeout=10)
-            except subprocess.TimeoutExpired:chrome.kill();chrome.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(chrome.pid,signal.SIGKILL);chrome.wait(timeout=5)
+            time.sleep(.5) # Allow owned profile writers to finish after group termination.

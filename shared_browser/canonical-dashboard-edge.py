@@ -135,9 +135,17 @@ class Handler(BaseHTTPRequestHandler):
                 upstream = http.client.HTTPSConnection(*BACKEND, context=self.server.upstream_tls, timeout=660)
                 upstream.connect()
                 verify_pin(upstream.sock.getpeercert(binary_form=True))
-            upstream.request(self.command, self.path, body=body, headers=headers)
+            interrupted = False
+            try:
+                upstream.request(self.command, self.path, body=body, headers=headers)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                # A rejecting backend may send its final response before reading the body.
+                # Read that response once; never retry or replay any upload.
+                interrupted = True
+                if upstream.sock is not None:
+                    upstream.sock.settimeout(10)
             response = upstream.getresponse()
-            if not helper and body.remaining:
+            if (interrupted or (not helper and body.remaining)) and response.status < 400:
                 raise ValueError('incomplete upstream request')
             data = response.read(500001) if helper else None
             if helper and len(data) > 500000:
@@ -172,7 +180,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
-                self.wfile.write(data)
+                if self.command != 'HEAD':
+                    self.wfile.write(data)
         finally:
             if upstream is not None:
                 upstream.close()
