@@ -24,7 +24,11 @@ def probe(chromium):
             "ready": False,
             "error": "Run browser provisioning as an unprivileged user with sudo.",
         }
-    with tempfile.TemporaryDirectory(prefix="devtools-browser-probe.") as directory:
+    snap_browser = str(chromium).startswith("/snap/bin/chromium")
+    probe_root = Path.home() / "snap/chromium/common" if snap_browser else None
+    if probe_root:
+        probe_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="devtools-browser-probe.", dir=probe_root) as directory:
         args = [
             str(chromium),
             "--headless",

@@ -34,12 +34,21 @@ if [ -f "$browser_state/supervisor.conf" ]; then
 fi
 browser_host_service=$("$node_path" "$runtime_dir/settings.mjs" hostService)
 browser_engine=${SHARED_BROWSER_ENGINE:-native}
-chrome_path=$("$node_path" "$runtime_dir/settings.mjs" chrome)
-if [ -z "$chrome_path" ] && [ "$browser_engine" != attached ]; then chrome_path=$(command -v google-chrome || true); fi
-if [ -z "$chrome_path" ] && [ -f "$HOME/.config/dev-tools/browser.json" ]; then
-  chrome_path=$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/".config/dev-tools/browser.json").read_text()).get("chromium", ""))')
+chrome_path=''
+if [ "$browser_engine" != attached ]; then
+  chrome_path=$(python3 "$runtime_dir/chrome.py" resolve)
+  repo_for_probe=${SHARED_BROWSER_REPO:-$(dirname "$runtime_dir")}
+  if [ ! -f "$repo_for_probe/browser/sandbox.py" ]; then
+    repo_for_probe="$HOME/.local/share/dev-tools"
+  fi
+  if [ ! -f "$repo_for_probe/browser/sandbox.py" ]; then
+    echo 'Shared browser needs the dev-tools sandbox probe; run provision.sh from a complete checkout.' >&2
+    exit 1
+  fi
+  python3 "$repo_for_probe/browser/sandbox.py" repair "$chrome_path" || {
+    case "$?" in 10) : ;; *) exit 1 ;; esac
+  }
 fi
-if [ -z "$chrome_path" ] && [ "$browser_engine" != attached ]; then chrome_path=$(command -v google-chrome || command -v chromium); fi
 case "$browser_engine" in
   native)
     xvfb_path=$(command -v Xvfb) || { echo 'Native Chrome requires Xvfb (Ubuntu: sudo apt-get install xvfb).' >&2; exit 1; }
@@ -73,14 +82,25 @@ if [ "$service_backend" = systemd ]; then
 mkdir -p "$HOME/.config/systemd/user" "$browser_state"
 chmod 700 "$browser_state"
 browser_restore=false
+host_restart=false
+if [ "$browser_engine" = native ] && systemctl --user is-active --quiet "$browser_host_service"; then
+  host_pid=$(systemctl --user show "$browser_host_service" --property=MainPID --value)
+  old_chrome=$(tr '\000' '\n' < "/proc/$host_pid/environ" | sed -n 's/^SHARED_BROWSER_CHROME=//p' | head -1)
+  if [ "$old_chrome" != "$chrome_path" ]; then
+    host_restart=true
+  fi
+fi
 if systemctl --user is-active --quiet dev-tools-shared-browser.service; then
-  if [ "$browser_engine" = headless ] || ! systemctl --user is-active --quiet "$browser_host_service"; then
+  if [ "$browser_engine" = headless ] || [ "$host_restart" = true ] || ! systemctl --user is-active --quiet "$browser_host_service"; then
     "$node_path" "$runtime_dir/migrate-engine.mjs" save
     browser_restore=true
   fi
   # Stop an owned headless browser before starting the native host on its
   # profile. A native receiver update only disconnects; Chrome stays running.
   systemctl --user stop dev-tools-shared-browser.service
+fi
+if [ "$host_restart" = true ]; then
+  systemctl --user stop "$browser_host_service"
 fi
 # Retire the receiver's previous host before replacing its dependency. Keeping
 # it alive can make copied authenticated tabs revoke the new browser's session.
