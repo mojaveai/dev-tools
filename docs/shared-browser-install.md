@@ -57,6 +57,22 @@ checks Chromium's sandbox, starts the services, verifies browser RPC readiness,
 and publishes port 8443 only when it is free or already belongs to this browser.
 Other Serve routes are preserved. Use `--skip mod_shared_browser` to omit it.
 
+The managed browser resolver uses an installed regular Google Chrome on x86_64
+Ubuntu/Debian, or downloads Google's stable `.deb` into the user's home and
+verifies its published SHA256. On ARM64 it uses standard distribution Chromium;
+Ubuntu installs the Canonical Snap package and Debian uses its `chromium` package.
+Chrome for Testing and the browser in `~/.config/dev-tools/browser.json` are never
+selected. The chosen executable is recorded in `shared-browser.json` for future
+updates. A direct runtime install uses the same resolver. Ubuntu's Snap Chromium
+keeps its profile and X11 cookie in `~/snap/chromium/common/dev-tools-shared-browser`
+so its confinement permits access; the viewer and service state stay in the
+configured state directory.
+The provisioner and direct installer test the browser sandbox with a temporary
+`about:blank` profile before service startup. The shared browser itself runs
+with a visible Xvfb display and no headless flag. Switching browser products
+restarts the browser host once and reopens tab addresses; an ordinary update
+keeps the running browser and its profile.
+
 Prerequisites for the standalone runtime installer: Linux, Python 3.11+, Node
 22+, npm, sandbox-capable Chromium, Tailscale, Xvfb and flock. Hosts with a user
 systemd manager use it; containers without one require the `supervisor` package.
@@ -109,11 +125,13 @@ desktop user to allow the debugger connection, which gives the receiver access
 to that Chrome's tabs and browser data. The receiver disconnects rather than
 closes the desktop Chrome on stop. When Chrome exits, the receiver stops and
 the service retries until Chrome is available again. A new connection may
-need another approval in Chrome.
+need another approval in Chrome. Chrome controls this prompt for attached
+desktop sessions. Managed `native` mode uses its own loopback debugging port
+and does not require approval for each receiver connection.
 
 The default managed `native` mode remains the portable choice for hosts with
-no desktop Chrome to attach. It uses regular, visible Google Chrome on a
-private Xvfb display; that window will not appear in an unrelated AnyDesk
+no desktop Chrome to attach. It uses regular, visible Google Chrome (standard
+Chromium on ARM64) on a private Xvfb display; that window will not appear in an unrelated AnyDesk
 desktop session. Attached and managed Chrome profiles do not share logins.
 
 Do not replace an occupied 8443 listener. Do not reset Serve configuration or

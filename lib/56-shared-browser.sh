@@ -36,19 +36,11 @@ shared_browser_install() (
     fi
     PATH="$(dirname "$browser_node"):$PATH"; export PATH
     have npm || { echo 'Shared browser requires npm alongside Node' >&2; return 1; }
-    chrome=$("$browser_node" "$REPO_DIR/shared_browser/settings.mjs" chrome) || return 1
-    [ -n "$chrome" ] || chrome=$(command -v google-chrome || true)
-    if [ -z "$chrome" ] && [ -f "$HOME/.config/dev-tools/browser.json" ]; then
-        chrome=$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/".config/dev-tools/browser.json").read_text()).get("chromium", ""))') || return 1
+    chrome=''
+    if [ "${SHARED_BROWSER_ENGINE:-native}" != attached ]; then
+        chrome=$(python3 "$REPO_DIR/shared_browser/chrome.py" resolve) || return 1
     fi
-    if [ -z "$chrome" ] || [ ! -x "$chrome" ]; then
-        chrome_runtime="$HOME/.local/share/dev-tools-browser/runtime"
-        mkdir -p "$chrome_runtime" || return 1
-        cp "$REPO_DIR/config/browser/package.json" "$REPO_DIR/config/browser/package-lock.json" "$chrome_runtime/" || return 1
-        (cd "$chrome_runtime" && npm ci --no-audit --no-fund && node node_modules/playwright/cli.js install chromium) || return 1
-        chrome=$(cd "$chrome_runtime" && node -e 'process.stdout.write(require("playwright").chromium.executablePath())') || return 1
-    fi
-    if ldd "$chrome" 2>/dev/null | grep -q 'not found'; then
+    if [ -n "$chrome" ] && ldd "$chrome" 2>/dev/null | grep -q 'not found'; then
         can_privileged || { echo 'Chromium system dependencies require sudo' >&2; return 1; }
         # Use the pinned Playwright dependency installer for Linux libraries.
         chrome_runtime="$HOME/.local/share/dev-tools-browser/runtime"
@@ -57,8 +49,10 @@ shared_browser_install() (
         (cd "$chrome_runtime" && npm ci --no-audit --no-fund) || return 1
         run_privileged "$browser_node" "$chrome_runtime/node_modules/playwright/cli.js" install-deps chromium || return 1
     fi
-    python3 "$REPO_DIR/browser/sandbox.py" repair "$chrome"
-    case $? in 0|10) : ;; *) return 1 ;; esac
+    if [ -n "$chrome" ]; then
+        python3 "$REPO_DIR/browser/sandbox.py" repair "$chrome"
+        case $? in 0|10) : ;; *) return 1 ;; esac
+    fi
     browser_serve_operator || return 1
     runtime="$HOME/.local/share/dev-tools-shared-browser"
     python3 - "$REPO_DIR/shared_browser" "$runtime" <<'PY'

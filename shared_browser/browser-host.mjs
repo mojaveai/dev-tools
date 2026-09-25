@@ -53,10 +53,15 @@ export async function runBrowserHost() {
   const state=settings.stateDir;
   const executable=settings.chrome||'/usr/bin/google-chrome';
   await fs.mkdir(state,{recursive:true,mode:0o700});
+  // Strictly confined Snap Chromium may read its own common data directory,
+  // but cannot read the hidden dev-tools state directory in HOME.
+  const snap=executable.startsWith('/snap/bin/chromium');
+  const browserData=snap?path.join(process.env.HOME,'snap/chromium/common/dev-tools-shared-browser'):state;
+  await fs.mkdir(browserData,{recursive:true,mode:0o700});
   // OS advisory locking is supplied by the systemd unit's flock. The endpoint
   // file is published only after the owned Chrome process announces readiness.
   const endpointFile=path.join(state,'browser-host.json');
-  const auth=path.join(state,'browser-host.Xauthority');
+  const auth=path.join(browserData,'browser-host.Xauthority');
   let display,chrome,endpoint,stopping=false;
   const stop=async(code=0)=>{
     if(stopping)return;stopping=true;
@@ -76,7 +81,7 @@ export async function runBrowserHost() {
     display.once('exit',()=>{if(!stopping)void stop(1);});
     const port=await freePort();
     chrome=spawn(executable,[
-      '--user-data-dir='+path.join(state,'profile'),
+      '--user-data-dir='+path.join(browserData,'profile'),
       '--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port,
       '--no-first-run','--no-default-browser-check','--disable-dev-shm-usage',
       '--window-size=1280,900','about:blank',
