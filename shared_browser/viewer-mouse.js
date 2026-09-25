@@ -26,6 +26,7 @@ export function relayMouse(element,{enabled,context,point,send}) {
   on(element,'pointerdown',e=>{
     suppressClick=false;
     if(!enabled() || e.pointerType!=='mouse' || e.target!==element || e.button!==0)return;
+    e.preventDefault(); // Do not start a competing local text selection.
     flush(true);held=message(e,'down');suppressClick=true;
     element.setPointerCapture(e.pointerId);send(held);
   });

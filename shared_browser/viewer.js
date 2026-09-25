@@ -1,7 +1,12 @@
+import { installContextMenu } from './viewer-context-menu.js';
+import { compactCanvasHistory } from './canvas-history.mjs';
+import { copyReplaySelection, handleReplayCopyKey, replaySelection, settledReplaySelection } from './viewer-clipboard.js';
+import { matchLayoutMetrics } from './layout-metrics.js';
+import { paintCanvasSnapshots } from './canvas-snapshots.js';
+import { paintOpaqueSurfaces } from './opaque-viewer.js';
 import { ViewerAgents } from "./viewer-agents.js";
 import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
-import { paintOpaqueSurfaces } from './opaque-viewer.js';
 import { controlOcclusion } from "./control-occlusion.js";
 import { relayMouse } from "./viewer-mouse.js";
 import { controlVisibility } from "./control-visibility.js";
@@ -29,6 +34,10 @@ const transfers = new ViewerTransfers({context:()=>({tab:active,generation,clien
 const passkeys = new ViewerPasskeys();
 const caches = new Map();
 const opaqueCache = new Map();
+let replayHistory = {};
+let pointerRelease;
+document.addEventListener('copy', event => copyReplaySelection(event, replayer?.iframe.contentDocument));
+document.addEventListener('keydown', event => handleReplayCopyKey(event, replayer?.iframe.contentDocument, document, navigator.clipboard, () => error('Could not copy text to the clipboard.'), () => pointerRelease && performance.now()-pointerRelease.at<1500 ? settledReplaySelection(() => replaySelection(replayer?.iframe.contentDocument), pointerRelease.ack) : null));
 const agentPointer=new AgentPointer(document.getElementById("viewport"));
 const webkit=/AppleWebKit/.test(navigator.userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
 let foreignObjects, foreignObjectsDirty=true;
@@ -103,6 +112,10 @@ function send(message) {
     return;
   }
   const requestId=crypto.randomUUID();
+  if (message.type==='pointer' && message.phase==='up') {
+    let resolve;const ack=new Promise(done=>{resolve=done;});
+    pointerRelease={requestId,at:performance.now(),ack,resolve};
+  }
   ws.send(
     JSON.stringify({
       tab: active,
@@ -135,13 +148,15 @@ function fit() {
   agentPointer.layer.style.transform=`scale(${scale})`;
 }
 function rewrite(event, tab) {
-  return rewriteAssets(event,tab,state?.tabs.find(t=>t.id===tab)?.url);
+  const out = rewriteAssets(event,tab,state?.tabs.find(t=>t.id===tab)?.url);
+  compactCanvasHistory(out, replayHistory);
+  return out;
 }
 // Keep browser-native controls in the parent document. Sandboxed replay frames
 // are visual-only: Safari blocks parent-installed handlers inside those frames.
 const controls = new Map();
 const sourceOpacity=new WeakMap();
-let overlay, overlayGeneration, layoutFrame;
+let overlay, overlayGeneration, layoutFrame, closeContextMenu;
 function scheduleLayout() {
   if (layoutFrame) return;
   layoutFrame=requestAnimationFrame(() => {layoutFrame=null;wireFrame();});
@@ -149,6 +164,8 @@ function scheduleLayout() {
 function wireFrame() {
   const doc = replayer?.iframe.contentDocument;
   if (!doc?.documentElement) return;
+  matchLayoutMetrics(doc);
+  paintCanvasSnapshots(doc);
   if(webkit) {
     if(foreignObjects?.doc!==doc){foreignObjects=new ForeignObjectTransforms(doc);foreignObjectsDirty=true;}
     if(foreignObjectsDirty){foreignObjects.refresh();foreignObjectsDirty=false;}
@@ -158,6 +175,12 @@ function wireFrame() {
     overlay.id = "interaction-layer";
     overlay.style.cssText = "position:absolute;inset:0;transform-origin:top left;z-index:2";
     $("viewport").append(overlay);
+    closeContextMenu = installContextMenu({root:overlay, replayDocument:()=>replayer?.iframe.contentDocument, valid:()=>connected && ready && !awaitingSnapshot, reportError:error});
+    overlay.tabIndex = -1;
+    overlay.style.outline = 'none';
+    overlay.addEventListener('pointerdown', e => {
+      if (e.target === overlay && e.pointerType === 'mouse') overlay.focus({preventScroll:true});
+    });
     mouseRelay=relayMouse(overlay,{enabled:()=>connected && mouseSupported,
       context:()=>({tab:active,generation}),
       point:e=>{const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/scale,y:(e.clientY-r.top)/scale};},send});
@@ -314,6 +337,9 @@ function wireFrame() {
   reveal();
 }
 function showTab(id) {
+  closeContextMenu?.();
+  replayHistory = {};
+  pointerRelease = null;
   mouseRelay?.dispose();mouseRelay=null;
   const changed=active!==id;
   agentPointer.reset();
@@ -348,6 +374,7 @@ function showTab(id) {
       // other stylesheet animations run even while no DOM events arrive.
       pauseAnimation: false,
       mouseTail: false,
+      insertStyleRules: ["html {overflow-anchor:none!important}"],
       showWarning: false,
       UNSAFE_replayCanvas: false,
     },
@@ -387,6 +414,9 @@ function showTab(id) {
   });
   replayer.startLive();
   replayer.disableInteract();
+  // Keep native layout gutters while the overlay owns input. rrweb's
+  // scrolling=no removes source scrollbars and shifts centered content.
+  replayer.iframe.setAttribute("scrolling", "auto");
   replayer.iframe.style.border = "0";
   setTimeout(() => {
     fit();
@@ -414,6 +444,7 @@ function eventReceived(message) {
     cache.events = cache.events.filter((e) => e.type === 4).slice(-1);
     cache.generation = message.generation;
   }
+  compactCanvasHistory(message.event, cache);
   cache.events.push(message.event);
   if (message.tab === active) {
     generation = cache.generation;
@@ -472,7 +503,7 @@ function connect() {
   ws.onmessage = (e) => {
     try {
       const m = JSON.parse(e.data);
-      if(m.type==='ack' || m.type==='error')mouseRelay?.acknowledge(m.requestId);
+      if(m.type==='ack' || m.type==='error'){mouseRelay?.acknowledge(m.requestId);if(pointerRelease?.requestId===m.requestId)pointerRelease.resolve(m.type==='ack');}
       if(m.type==="agentActivity" && m.tab===active && m.generation===generation) {
         agentPointer.handle(m,node=>{
           const element=replayer?.getMirror().getNode(node);

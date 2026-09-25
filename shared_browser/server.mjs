@@ -1,3 +1,6 @@
+import { compactCanvasHistory } from './canvas-history.mjs';
+import { installCanvasSnapshots } from './canvas-snapshots.js';
+import { installLayoutMetrics } from './layout-metrics.js';
 import http from "node:http";
 import {authCompanionProxy} from './auth-companion-proxy.mjs';
 import {TabIdle} from "./tab-idle.mjs";
@@ -75,8 +78,9 @@ const browser = managedEndpoint
     "--no-default-browser-check",
   ],
 });
-// Keep the geometry of a real Chrome window. Device emulation changes browser
-// properties that challenge pages may inspect.
+// A real desktop Chrome already has a physical window. CDP setViewport enables
+// device emulation, which changes browser signals on challenge pages. Scale
+// the viewer instead of emulating a different device in the source browser.
 const preserveNativeViewport=!!(managedEndpoint || externalBrowserURL || externalBrowserEndpoint);
 const transferDir = await fs.mkdtemp(path.join(stateDir, 'transfers-'));
 const uploads = new UploadStore(path.join(transferDir, 'uploads'));
@@ -373,7 +377,7 @@ async function attachPage(page) {
     compactImages(event,tab.resources);
     const item = { type: "event", tab: tab.id, generation, event };
     tab.events.push(item);
-    tab.eventBytes += JSON.stringify(item).length;
+    tab.eventBytes += JSON.stringify(item).length - compactCanvasHistory(event, tab);
     if (tab.eventBytes > 12 * 1024 * 1024) {
       tab.events = [];
       tab.eventBytes = 0;
@@ -382,6 +386,11 @@ async function attachPage(page) {
     broadcast(item);
   });
   await page.evaluateOnNewDocument(recorder);
+  // Also repair retained documents without replacing their recorder/mirror.
+  for (const install of [installCanvasSnapshots, installLayoutMetrics]) {
+    await page.evaluateOnNewDocument(install);
+    for (const frame of page.frames()) await frame.evaluate(install).catch(() => {});
+  }
   // Preserve the existing document's recorder and mirror when reconnecting.
   // Re-evaluating rrweb creates another iframe message mapper; stopping record
   // does not remove that mapper in 2.1.4. New documents receive the new bundle.
