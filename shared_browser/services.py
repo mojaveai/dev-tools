@@ -18,9 +18,16 @@ def value(text):
 
 def configuration(state, runtime, node, chrome, origin, owner, xvfb, engine):
     state, runtime = Path(state), Path(runtime)
+    if engine not in ('native', 'headless', 'attached'):
+        raise ValueError('Unknown shared browser engine')
     env = dict(SHARED_BROWSER_STATE=str(state), SHARED_BROWSER_CHROME=chrome,
                SHARED_BROWSER_ORIGIN=origin, SHARED_BROWSER_OWNER=owner,
                SHARED_BROWSER_XVFB=xvfb, SHARED_BROWSER_ENGINE=engine)
+    if engine == 'attached':
+        port_file = os.environ.get('SHARED_BROWSER_CDP_PORT_FILE', '')
+        if not Path(port_file).is_absolute():
+            raise ValueError('Attached Chrome requires an absolute debugger port file')
+        env.update(SHARED_BROWSER_CDP_PORT_FILE=port_file, SHARED_BROWSER_NODE=node)
     text = f'''[unix_http_server]
 file={value(state / 'supervisor.sock')}
 chmod=0700
@@ -36,7 +43,9 @@ supervisor.rpcinterface_factory=supervisor.rpcinterface:make_main_rpcinterface
 [supervisorctl]
 serverurl=unix://{value(state / 'supervisor.sock')}
 '''
-    programs = [('receiver', [node, str(runtime / 'server.mjs')], 20)]
+    receiver = ([str(runtime / 'attach-external-chrome.sh')] if engine == 'attached'
+                else [node, str(runtime / 'server.mjs')])
+    programs = [('receiver', receiver, 20)]
     repo = Path(os.environ.get('SHARED_BROWSER_REPO', runtime.parent))
     if not (repo / 'native_browser/configure.py').exists():
         repo = Path.home() / '.local/share/dev-tools'

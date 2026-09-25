@@ -18,6 +18,11 @@ const fixture=http.createServer((req,res)=>{
   res.setHeader('Content-Type','text/html');
   res.end(`<!doctype html><title>Follow ${req.url}</title><h1>Follow ${req.url}</h1>
     <button id="count" onclick="this.textContent='Clicked at '+innerWidth">Click</button>
+    <div id="opaque-host" style="width:180px;height:50px"></div>
+    <script>
+      const root=document.getElementById('opaque-host').attachShadow({mode:'closed'});
+      root.innerHTML='<button style="width:180px;height:50px;background:rgb(12, 150, 90)" onclick="window.opaqueClicks=(window.opaqueClicks||0)+1">Hidden control</button>';
+    </script>
     <input aria-label="Note"><a id="popup" href="/popup" target="_blank">Open popup</a>
     <div style="height:1800px">Scroll area</div>`);
 });
@@ -73,12 +78,23 @@ try {
     getComputedStyle(document.querySelector('#viewport')).visibility==='visible' &&
     document.querySelector('#replay iframe')?.contentDocument?.body?.textContent.includes(text),{id,text});
   const both=async(id,text)=>{
-    for(const page of pages){
+    for(const [index,page] of pages.entries()){
       await page.bringToFront();
-      await wait(()=>showing(page,id,text),'both viewers visibly show '+text);
+      await wait(()=>showing(page,id,text),'viewer '+index+' visibly shows '+text);
     }
   };
   await both(b,'Follow /b');
+  await pages[0].bringToFront();
+  await wait(()=>pages[0].evaluate(()=>!!document.querySelector('#interaction-layer img[data-opaque-id]')),'closed shadow image');
+  const opaque=await pages[0].evaluate(()=>{
+    const image=document.querySelector('#interaction-layer img[data-opaque-id]');
+    const box=image.getBoundingClientRect();
+    return {x:box.x+box.width/2,y:box.y+box.height/2,src:image.src};
+  });
+  assert.ok(opaque.src.startsWith('data:image/png;base64,'));
+  await pages[0].mouse.click(opaque.x,opaque.y);
+  await wait(()=>sourceB.evaluate(()=>window.opaqueClicks===1),'closed shadow click');
+  console.log('PASS: closed shadow pixels appear in replay and viewer clicks reach source Chrome');
   const events=[];
   ws=new WebSocket(origin.replace('http','ws')+'/ws',{headers:{...headers,Origin:origin}});
   ws.on('message',raw=>events.push(JSON.parse(raw)));
@@ -88,14 +104,17 @@ try {
   assert.equal((await rpc('state')).activeTab,b,'read-only inspection remains passive');
   events.length=0;
   await act("await a.click('#count');");
-  await both(a,'Clicked at 940');
+  const clicked=await sourceA.$eval('#count',e=>e.textContent);
+  assert.match(clicked,/^Clicked at \d+$/);
+  await both(a,clicked);
   const selected=events.findIndex(e=>e.type==='state'&&e.activeTab===a);
   const cue=events.findIndex(e=>e.type==='agentActivity'&&e.tab===a&&e.phase==='start');
   assert.ok(selected>=0 && cue>selected,'viewer switches before action feedback');
-  assert.equal(await sourceA.$eval('#count',e=>e.textContent),'Clicked at 940');
-  console.log('PASS: retained background tab action selects both viewers before feedback, at the viewer viewport size');
+  assert.equal(await sourceA.$eval('#count',e=>e.textContent),clicked);
+  console.log('PASS: retained background tab action selects both viewers without device emulation');
 
   // Delayed events from the old viewer must not steal Chrome focus or resize it.
+  const sourceWidth=await sourceB.evaluate(()=>innerWidth);
   const generation=(await rpc('state')).tabs.find(t=>t.id===b).generation;
   ws.send(JSON.stringify({type:'resize',tab:b,width:333,height:444,requestId:'stale-resize'}));
   ws.send(JSON.stringify({type:'pointer',phase:'move',tab:b,generation,x:10,y:10,modifiers:0,requestId:'stale-hover'}));
@@ -103,7 +122,7 @@ try {
   await wait(()=>events.some(e=>e.requestId==='stale-click'),'stale messages processed');
   assert.equal((await rpc('state')).activeTab,a);
   assert.equal(await sourceA.evaluate(()=>document.visibilityState),'visible');
-  assert.equal(await sourceB.evaluate(()=>innerWidth),940);
+  assert.equal(await sourceB.evaluate(()=>innerWidth),sourceWidth);
   assert.match(events.find(e=>e.requestId==='stale-click').message,/Tab changed/);
   assert.equal(events.find(e=>e.requestId==='stale-click').code,'STALE_VIEW');
   console.log('PASS: late old-tab resize, hover, and click cannot switch back or act on a stale view');

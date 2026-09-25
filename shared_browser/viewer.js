@@ -1,6 +1,7 @@
 import { ViewerAgents } from "./viewer-agents.js";
 import { ViewerShell } from "./viewer-shell.js";
 import { rewriteAssets } from "./replay-assets.mjs";
+import { paintOpaqueSurfaces } from './opaque-viewer.js';
 import { controlOcclusion } from "./control-occlusion.js";
 import { relayMouse } from "./viewer-mouse.js";
 import { controlVisibility } from "./control-visibility.js";
@@ -27,6 +28,7 @@ let mouseRelay,mouseSupported=false;
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const passkeys = new ViewerPasskeys();
 const caches = new Map();
+const opaqueCache = new Map();
 const agentPointer=new AgentPointer(document.getElementById("viewport"));
 const webkit=/AppleWebKit/.test(navigator.userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
 let foreignObjects, foreignObjectsDirty=true;
@@ -212,6 +214,8 @@ function wireFrame() {
   overlay.style.width = replayer.iframe.width+"px";
   overlay.style.height = replayer.iframe.height+"px";
   overlay.style.transform = `scale(${scale})`;
+  const opaque=opaqueCache.get(active);
+  paintOpaqueSurfaces(overlay,replayer.getMirror(),opaque?.generation===generation ? opaque.surfaces : []);
   const seen = new Set();
   const occlusion=controlOcclusion(doc);
   const visibilityCache=new WeakMap(), plans=[], restore=[];
@@ -401,6 +405,7 @@ function eventReceived(message) {
     caches.set(message.tab, cache);
   }
   if (message.event.type === 2) {
+    opaqueCache.delete(message.tab);
     if(message.tab===active && generation!==message.generation) {
       agentPointer.reset();scrollSync.clear();scrollEchoes.clear();
       clearTimeout(scrollTimer);scrollTimer=null;pendingScroll=null;
@@ -421,6 +426,8 @@ function eventReceived(message) {
 }
 function update(next) {
   state = next;
+  const currentTabs=new Set(next.tabs.map(tab=>tab.id));
+  for(const id of opaqueCache.keys())if(!currentTabs.has(id))opaqueCache.delete(id);
   agentTabs.update(next);
   $("take").disabled = !connected || own();
   $("give").disabled = !own();
@@ -455,6 +462,7 @@ function connect() {
     retries = 0;
     error("");
     caches.clear();
+    opaqueCache.clear();
     if (replayer) {
       replayer.destroy();
       replayer = null;
@@ -483,6 +491,10 @@ function connect() {
       if (m.type === "state") update(m);
       if (m.type === "agentTabs" && state) {state.agents=m.agents;agentTabs.update(state);}
       if (m.type === "event") eventReceived(m);
+      if (m.type === 'opaque') {
+        opaqueCache.set(m.tab,{generation:m.generation,surfaces:m.surfaces});
+        if(m.tab===active && m.generation===generation)scheduleLayout();
+      }
       // Keep the last rendered document until replacement events arrive.
       // Older servers also announce hash/history changes as navigation: those
       // only emit incremental mutations, not a fresh full snapshot. Clearing

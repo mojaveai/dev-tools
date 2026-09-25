@@ -33,13 +33,13 @@ if [ -f "$browser_state/supervisor.conf" ]; then
     }
 fi
 browser_host_service=$("$node_path" "$runtime_dir/settings.mjs" hostService)
+browser_engine=${SHARED_BROWSER_ENGINE:-native}
 chrome_path=$("$node_path" "$runtime_dir/settings.mjs" chrome)
-if [ -z "$chrome_path" ]; then chrome_path=$(command -v google-chrome || true); fi
+if [ -z "$chrome_path" ] && [ "$browser_engine" != attached ]; then chrome_path=$(command -v google-chrome || true); fi
 if [ -z "$chrome_path" ] && [ -f "$HOME/.config/dev-tools/browser.json" ]; then
   chrome_path=$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/".config/dev-tools/browser.json").read_text()).get("chromium", ""))')
 fi
-if [ -z "$chrome_path" ]; then chrome_path=$(command -v google-chrome || command -v chromium); fi
-browser_engine=${SHARED_BROWSER_ENGINE:-native}
+if [ -z "$chrome_path" ] && [ "$browser_engine" != attached ]; then chrome_path=$(command -v google-chrome || command -v chromium); fi
 case "$browser_engine" in
   native)
     xvfb_path=$(command -v Xvfb) || { echo 'Native Chrome requires Xvfb (Ubuntu: sudo apt-get install xvfb).' >&2; exit 1; }
@@ -48,8 +48,25 @@ case "$browser_engine" in
 After=$browser_host_service"
     ;;
   headless) browser_dependency='' ;;
-  *) echo 'SHARED_BROWSER_ENGINE must be native or headless' >&2; exit 1 ;;
+  attached)
+    case "${SHARED_BROWSER_CDP_PORT_FILE:-}" in
+      /*) : ;;
+      *) echo 'Attached Chrome requires an absolute SHARED_BROWSER_CDP_PORT_FILE' >&2; exit 1 ;;
+    esac
+    case "$SHARED_BROWSER_CDP_PORT_FILE" in
+      *[!a-zA-Z0-9_./-]*) echo 'Unsupported character in Chrome port file path' >&2; exit 1 ;;
+    esac
+    browser_dependency=''
+    ;;
+  *) echo 'SHARED_BROWSER_ENGINE must be native, attached or headless' >&2; exit 1 ;;
 esac
+receiver_command="$node_path $runtime_dir/server.mjs"
+attachment_environment=''
+if [ "$browser_engine" = attached ]; then
+  receiver_command="$runtime_dir/attach-external-chrome.sh"
+  attachment_environment="Environment=SHARED_BROWSER_NODE=$node_path
+Environment=SHARED_BROWSER_CDP_PORT_FILE=$SHARED_BROWSER_CDP_PORT_FILE"
+fi
 npm ci
 npm run build
 if [ "$service_backend" = systemd ]; then
@@ -105,12 +122,13 @@ $browser_dependency
 [Service]
 Type=simple
 WorkingDirectory=$runtime_dir
-ExecStart=$node_path $runtime_dir/server.mjs
+ExecStart=$receiver_command
 Environment="SHARED_BROWSER_STATE=$browser_state"
 Environment="SHARED_BROWSER_CHROME=$chrome_path"
 Environment=SHARED_BROWSER_ENGINE=$browser_engine
 Environment=SHARED_BROWSER_ORIGIN=$browser_origin
 Environment=SHARED_BROWSER_OWNER=$browser_owner
+$attachment_environment
 UMask=0077
 KillMode=mixed
 TimeoutStopSec=20
@@ -145,7 +163,7 @@ if systemctl --user is-active --quiet dev-tools-portal-passkey.service; then
   systemctl --user restart dev-tools-portal-passkey.service
 fi
 else
-    python3 "$runtime_dir/services.py" install "$browser_state" "$runtime_dir" "$node_path" "$chrome_path" "$browser_origin" "$browser_owner" "${xvfb_path:-}" "$browser_engine"
+    SHARED_BROWSER_CDP_PORT_FILE=${SHARED_BROWSER_CDP_PORT_FILE:-} python3 "$runtime_dir/services.py" install "$browser_state" "$runtime_dir" "$node_path" "$chrome_path" "$browser_origin" "$browser_owner" "${xvfb_path:-}" "$browser_engine"
     "$node_path" "$runtime_dir/rpc-alias.mjs"
 fi
 mkdir -p "$HOME/.local/bin"
