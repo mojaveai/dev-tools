@@ -89,6 +89,33 @@ cookies/profile data stay in place, but unsaved forms cannot survive that initia
 Chrome restart. `SHARED_BROWSER_ENGINE=headless` retains the old launch mode for
 diagnostics. Reinstalling in that mode also restarts Chrome.
 
+### Share an existing desktop Chrome
+
+Set `SHARED_BROWSER_ENGINE=attached` and an absolute
+`SHARED_BROWSER_CDP_PORT_FILE` when the shared viewer should show a Chrome
+window already running on a desktop, including one visible through AnyDesk.
+Chrome must have remote debugging enabled on loopback. For the default Linux
+Chrome profile the file is usually `~/.config/google-chrome/DevToolsActivePort`;
+use the actual desktop user's profile path. Then run the normal installer with
+these two variables. The installer configures either systemd or Supervisor
+without launching another Chrome. It reads the current debugging port and
+browser route on each receiver start, so a Chrome restart does not require
+editing a stored WebSocket URL.
+
+The service account must be able to read the port file. If a different desktop
+account owns it, grant the service account permission only for `sudo -n cat`
+of that exact file. The installer does not change sudoers. Chrome asks the
+desktop user to allow the debugger connection, which gives the receiver access
+to that Chrome's tabs and browser data. The receiver disconnects rather than
+closes the desktop Chrome on stop. When Chrome exits, the receiver stops and
+the service retries until Chrome is available again. A new connection may
+need another approval in Chrome.
+
+The default managed `native` mode remains the portable choice for hosts with
+no desktop Chrome to attach. It uses regular, visible Google Chrome on a
+private Xvfb display; that window will not appear in an unrelated AnyDesk
+desktop session. Attached and managed Chrome profiles do not share logins.
+
 Do not replace an occupied 8443 listener. Do not reset Serve configuration or
 broaden ACLs. Tailscale policy must allow the intended user to reach that port.
 Existing noVNC routes and profiles are retained for explicit fallback; no active

@@ -43,6 +43,16 @@ diff for reference. Do not enable Funnel.
 
 ## Setup and operation
 
+Closed shadow roots are deliberately hidden from page JavaScript, so rrweb
+cannot replay their contents. The receiver uses CDP to find visible hosts,
+captures bounded PNG snapshots, and places them over the replay. Pointer
+coordinates still go to the source Chrome. This makes controls such as a
+Turnstile checkbox visible and clickable in the shared viewer; the site still
+decides whether a challenge is accepted. Captures are limited to 12 hosts,
+2 million pixels and 4 MB per image per scan, and run only while a viewer is
+connected. See [installation](shared-browser-install.md) for the optional mode
+that attaches to an existing desktop Chrome.
+
 Copy this directory to the code location, then run `sh install.sh` on procbox.
 The installer reuses the sandbox-verified Chromium path from dev-tools' browser
 configuration when available. It never disables Chromium's sandbox.

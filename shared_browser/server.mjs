@@ -20,6 +20,7 @@ import { RemoteMouse } from "./remote-mouse.mjs";
 import { loopbackEndpoint } from "./browser-host.mjs";
 import { resourceRecovery } from "./resource-recovery.mjs";
 import { browserSettings } from "./settings.mjs";
+import { captureOpaqueSurfaces, opaqueSignature } from './opaque-surfaces.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const settings = await browserSettings();
@@ -37,9 +38,12 @@ await idleTabs.load();
 const recorder = await fs.readFile(path.join(root, "dist/recorder.js"), "utf8");
 // Diagnostic attachment keeps the desktop supervisor responsible for Chrome.
 const externalBrowserURL=process.env.SHARED_BROWSER_CDP_URL;
+const externalBrowserEndpoint=process.env.SHARED_BROWSER_CDP_WS_ENDPOINT;
+if(externalBrowserURL && externalBrowserEndpoint)
+  throw Error('Choose one external Chrome endpoint');
 const nativeEngine=process.env.SHARED_BROWSER_ENGINE==='native';
 let managedEndpoint;
-if(nativeEngine && !externalBrowserURL){
+if(nativeEngine && !externalBrowserURL && !externalBrowserEndpoint){
   for(let i=0;i<150;i++){
     try {
       const host=JSON.parse(await fs.readFile(path.join(stateDir,'browser-host.json'),'utf8'));
@@ -53,8 +57,11 @@ if(externalBrowserURL){
   if(u.protocol!=='http:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password)
     throw Error('External browser attachment must use an uncredentialed loopback HTTP endpoint');
 }
+if(externalBrowserEndpoint)loopbackEndpoint(externalBrowserEndpoint);
 const browser = managedEndpoint
   ? await puppeteer.connect({browserWSEndpoint:managedEndpoint,defaultViewport:null})
+  : externalBrowserEndpoint
+  ? await puppeteer.connect({browserWSEndpoint:externalBrowserEndpoint,defaultViewport:null})
   : externalBrowserURL
   ? await puppeteer.connect({browserURL:externalBrowserURL,defaultViewport:null})
   : await puppeteer.launch({
@@ -68,6 +75,9 @@ const browser = managedEndpoint
     "--no-default-browser-check",
   ],
 });
+// Keep the geometry of a real Chrome window. Device emulation changes browser
+// properties that challenge pages may inspect.
+const preserveNativeViewport=!!(managedEndpoint || externalBrowserURL || externalBrowserEndpoint);
 const transferDir = await fs.mkdtemp(path.join(stateDir, 'transfers-'));
 const uploads = new UploadStore(path.join(transferDir, 'uploads'));
 const downloads = new Downloads(path.join(transferDir, 'downloads'), () => {
@@ -133,7 +143,7 @@ const session = {
   async state() {
     return {
       sessionId: this.id,
-      engine: managedEndpoint ? 'native' : externalBrowserURL ? 'attached' : process.env.SHARED_BROWSER_HEADLESS==='false' ? 'headed-automation' : 'headless',
+      engine: managedEndpoint ? 'native' : externalBrowserURL || externalBrowserEndpoint ? 'attached' : process.env.SHARED_BROWSER_HEADLESS==='false' ? 'headed-automation' : 'headless',
       viewerUrl: publicOrigin + "/",
       controller: this.controller,
       message: this.message,
@@ -158,7 +168,7 @@ const session = {
       // action feedback. A viewer resize arrives later in the action queue.
       const viewport=this.tabs.get(this.active)?.page.viewport();
       const target=tab.page.viewport();
-      if(viewport && (viewport.width!==target?.width || viewport.height!==target?.height))
+      if(!preserveNativeViewport && viewport && (viewport.width!==target?.width || viewport.height!==target?.height))
         await tab.page.setViewport(viewport);
       for(const ws of sockets)await remoteMouse.release(ws).catch(()=>{});
     }
@@ -289,6 +299,8 @@ async function attachPage(page) {
     dialog: null,
     resources: new Map(),
     resourceBytes: 0,
+    opaque: [],
+    opaqueSignature: null,
   };
   session.tabs.set(tab.id, tab);
   tab.cdp = await page.createCDPSession();
@@ -353,6 +365,8 @@ async function attachPage(page) {
       tab.events = tab.events.filter((e) => e.event.type === 4).slice(-1);
       tab.eventBytes = 0;
       tab.generation = generation;
+      tab.opaque = [];
+      tab.opaqueSignature = null;
     }
     if (!tab.generation) tab.generation = generation;
     if (generation !== tab.generation && event.type !== 4) return;
@@ -381,6 +395,8 @@ async function attachPage(page) {
       tab.chooser = null;
       uploads.releaseTab(tab.id).catch(err => console.error(err.message));
       tab.generation = null;
+      tab.opaque = [];
+      tab.opaqueSignature = null;
       tab.events = [];
       tab.eventBytes = 0;
       broadcast({ type: "navigation", tab: tab.id });
@@ -450,6 +466,24 @@ async function expireIdleTabs(){
   await idleTabs.sweep([...session.tabs.values()],{active:session.active,hasViewers:sockets.size>0});
 }
 setInterval(()=>serial(expireIdleTabs).catch(e=>console.error('Tab inactivity cleanup failed:',e.message)),60000).unref();
+let opaqueScanRunning=false;
+async function scanOpaqueSurfaces() {
+  if(opaqueScanRunning || !sockets.size)return;
+  const tab=session.tabs.get(session.active);
+  if(!tab?.generation)return;
+  opaqueScanRunning=true;
+  const generation=tab.generation;
+  try {
+    const surfaces=await captureOpaqueSurfaces(tab.page,tab.cdp);
+    if(session.tabs.get(tab.id)!==tab || tab.generation!==generation)return;
+    const signature=opaqueSignature(surfaces);
+    if(signature===tab.opaqueSignature)return;
+    tab.opaque=surfaces;tab.opaqueSignature=signature;
+    broadcast({type:'opaque',tab:tab.id,generation,surfaces});
+  } catch(error) { console.error('Opaque surface capture failed:',error.message); }
+  finally {opaqueScanRunning=false;}
+}
+setInterval(scanOpaqueSurfaces,500).unref();
 const runtime = new AgentRuntime(session);
 async function body(req, max = 200000) {
   let size = 0,
@@ -629,7 +663,8 @@ wss.on("connection", (ws, req) => {
     const active=session.tabs.get(session.active);
     if(active && Number.isFinite(width) && Number.isFinite(height) && width>0 && height>0) {
       await active.page.bringToFront();
-      await active.page.setViewport({width:Math.max(320,Math.min(2560,Math.round(width))),height:Math.max(400,Math.min(1600,Math.round(height)))});
+      if(!preserveNativeViewport)
+        await active.page.setViewport({width:Math.max(320,Math.min(2560,Math.round(width))),height:Math.max(400,Math.min(1600,Math.round(height)))});
     }
     send(ws, { type: "state", ...(await session.state()) });
     for (const t of session.tabs.values()) {
@@ -652,8 +687,10 @@ wss.on("connection", (ws, req) => {
         // compatibility no-ops; all participants share the same action queue.
         if (message.type === "take" || message.type === "give") return;
         if (message.type === "sync") {
-          for (const t of session.tabs.values())
+          for (const t of session.tabs.values()) {
             for (const item of t.events) send(ws, item);
+            if(t.opaque.length && t.generation)send(ws,{type:'opaque',tab:t.id,generation:t.generation,surfaces:t.opaque});
+          }
           return;
         }
         if (message.type === "new") {
@@ -685,7 +722,7 @@ wss.on("connection", (ws, req) => {
           return;
         }
         if (message.type === "resize") {
-          await t.page.setViewport({
+          if(!preserveNativeViewport)await t.page.setViewport({
             width: Math.max(320, Math.min(2560, Math.round(message.width))),
             height: Math.max(400, Math.min(1600, Math.round(message.height))),
           });
@@ -853,7 +890,7 @@ async function stop() {
   if (!running) return;
   running = false;
   for (const ws of sockets) ws.close();
-  if(externalBrowserURL || managedEndpoint)await browser.disconnect();
+  if(externalBrowserURL || externalBrowserEndpoint || managedEndpoint)await browser.disconnect();
   else await browser.close();
   await fs.rm(transferDir, {recursive:true, force:true});
   rpc.close();

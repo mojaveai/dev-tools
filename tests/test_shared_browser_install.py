@@ -54,6 +54,15 @@ class InstallTests(unittest.TestCase):
         self.assertIn('[program:registration]', config)
         self.assertIn('autorestart=true', config)
 
+    def test_supervisor_attaches_to_existing_chrome_without_launching_a_host(self):
+        with patch.dict(os.environ, {'SHARED_BROWSER_CDP_PORT_FILE': '/desktop/DevToolsActivePort'}):
+            config = services.configuration('/state', '/runtime', '/node', '',
+                                            'https://host:8443', 'owner@example.test', '', 'attached')
+        self.assertIn('/runtime/attach-external-chrome.sh', config)
+        self.assertIn('SHARED_BROWSER_CDP_PORT_FILE="/desktop/DevToolsActivePort"', config)
+        self.assertIn('SHARED_BROWSER_NODE="/node"', config)
+        self.assertNotIn('[program:chrome]', config)
+
     def test_update_restarts_receiver_only(self):
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp)
