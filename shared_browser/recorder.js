@@ -1,3 +1,7 @@
+import { installLayoutMetrics } from './layout-metrics.js';
+installLayoutMetrics();
+import { installCanvasSnapshots } from './canvas-snapshots.js';
+installCanvasSnapshots();
 import { installFrameSnapshots } from "./frame-snapshots.js";
 installFrameSnapshots();
 import { record } from "@rrweb/record";

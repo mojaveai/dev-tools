@@ -24,6 +24,10 @@ export function rewriteAssets(event, tab, pageURL='https://invalid.local/') {
       if(['link','use','image'].includes(value.tagName) && typeof a.href==='string')a.href=asset(a.href);
       if(a.srcset)delete a.srcset;
       for(const key of ['style','_cssText'])if(typeof a[key]==='string')a[key]=css(a[key]);
+      if(a.style && typeof a.style==='object')for(const [name,value] of Object.entries(a.style)){
+        if(typeof value==='string')a.style[name]=css(value);
+        else if(Array.isArray(value) && typeof value[0]==='string')a.style[name]=[css(value[0]),...value.slice(1)];
+      }
     }
     if(value.type===3 && value.isStyle && typeof value.textContent==='string')value.textContent=css(value.textContent);
     for(const [key,v] of Object.entries(value)) {

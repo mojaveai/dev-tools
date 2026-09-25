@@ -20,3 +20,11 @@ test('legacy doctypes retain source quirks layout through rrweb rebuild',()=>{
  const event={type:2,data:{node:{type:0,compatMode:'BackCompat',childNodes:[{type:1,name:'html',publicId:'-//W3C//DTD HTML 4.01 Transitional//EN'},{type:2,tagName:'html',attributes:{}}]}}};
  const out=rewriteAssets(event,'tab');assert.equal(out.data.node.childNodes[0].type,2);assert.equal(event.data.node.childNodes[0].type,1);
 });
+test('incremental CSS backgrounds preserve priority and use the asset relay',()=>{
+ const event={type:3,data:{source:0,attributes:[{id:5,attributes:{style:{'background-image':['url("https://cdn.test/second.png")','important'],color:false,mask:'url(https://cdn.test/mask.svg)'}}}]}};
+ const out=rewriteAssets(event,'tab');const style=out.data.attributes[0].attributes.style;
+ assert.equal(extract(style['background-image'][0]),'https://cdn.test/second.png');
+ assert.equal(style['background-image'][1],'important');assert.equal(style.color,false);
+ assert.equal(extract(style.mask),'https://cdn.test/mask.svg');
+ assert.equal(event.data.attributes[0].attributes.style.mask,'url(https://cdn.test/mask.svg)');
+});
