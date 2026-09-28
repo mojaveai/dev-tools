@@ -22,6 +22,22 @@ try {
     const s = await rpc("state");
     console.log(command === "url" ? s.viewerUrl : JSON.stringify(s, null, 2));
   } else if (command === "stop") console.log(JSON.stringify(await rpc("stop")));
+  else if (command === "open") {
+    // CLI login flows (--no-browser) print an authorize URL whose loopback
+    // redirect must land on this host, so open it in the shared browser.
+    const url = new URL(process.argv[3] || "");
+    if (!["http:", "https:"].includes(url.protocol)) throw Error("Only http(s) URLs can be opened");
+    console.log(
+      JSON.stringify(
+        await rpc("js", {
+          context: "cli",
+          code: `const tab = await (await cua.getBrowser()).tabs.new(${JSON.stringify(url.href)}); nodeRepl.write(tab.id);`,
+        }),
+        null,
+        2,
+      ),
+    );
+  }
   else if (command === "request-input") {
     console.log(
       JSON.stringify(
@@ -35,7 +51,7 @@ try {
     );
   } else
     throw Error(
-      "Usage: dev-tools shared-browser {start|status|url|request-input|stop|mcp}",
+      "Usage: dev-tools shared-browser {start|status|url|open|request-input|stop|mcp}",
     );
 } catch (e) {
   console.error(e.message);

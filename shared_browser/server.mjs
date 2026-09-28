@@ -362,7 +362,10 @@ async function attachPage(page) {
     session.update().catch(() => {});
   });
   if (!session.active) session.active = tab.id;
-  await page.exposeFunction("__sharedEmit", ({ generation, event }) => {
+  // A raw binding, not page.exposeFunction: Puppeteer's puppeteer_-prefixed
+  // binding and wrapper are an automation fingerprint that Cloudflare JS
+  // detection flags, which then blocks the site's own API calls.
+  const onEmit = ({ generation, event }) => {
     if(event.type===3 && [2,5].includes(event.data.source))idleTabs.touch(tab.targetId);
     // Cross-origin child recording is relayed by rrweb to the top-level recorder.
     if (event.type === 2) {
@@ -384,7 +387,13 @@ async function attachPage(page) {
       page.evaluate(() => window.__sharedSnapshot?.()).catch(() => {});
     }
     broadcast(item);
+  };
+  tab.cdp.on("Runtime.bindingCalled", ({ name, payload }) => {
+    if (name !== "__sharedRecord") return;
+    try { onEmit(JSON.parse(payload)); } catch (err) { console.error("recorder event: " + err.message); }
   });
+  await tab.cdp.send("Runtime.enable");
+  await tab.cdp.send("Runtime.addBinding", { name: "__sharedRecord" });
   await page.evaluateOnNewDocument(recorder);
   // Also repair retained documents without replacing their recorder/mirror.
   for (const install of [installCanvasSnapshots, installLayoutMetrics]) {
@@ -395,7 +404,15 @@ async function attachPage(page) {
   // Re-evaluating rrweb creates another iframe message mapper; stopping record
   // does not remove that mapper in 2.1.4. New documents receive the new bundle.
   const recorded=await page.evaluate(()=>!!(window.__sharedStop && window.__sharedMirror && window.__sharedSnapshot)).catch(()=>false);
-  if(recorded)await page.evaluate(()=>window.__sharedSnapshot());
+  // Documents recorded before a receiver update may still call the retired
+  // object-argument __sharedEmit; forward them to the string binding.
+  if(recorded)await page.evaluate(()=>{
+    if(window.__sharedRecorderProtocol!==2)window.__sharedEmit=m=>{
+      try{window.__sharedRecord(typeof m==="string"?m:JSON.stringify(m));}catch{}
+      return Promise.resolve();
+    };
+    window.__sharedSnapshot();
+  }).catch(err=>console.error("recorder snapshot failed", err.message));
   else for(const frame of page.frames())await frame.evaluate(recorder).catch(() => {});
   // Puppeteer's framenavigated also fires for hash/history routing. Only a
   // new top-level document invalidates the recorder and its node IDs.

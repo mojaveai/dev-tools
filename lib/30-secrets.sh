@@ -11,6 +11,7 @@ secret_have() {
 }
 
 mod_secrets() {
+    DEVTOOLS_SECRETS_READY=0
     [ "${DEVTOOLS_PASS_READY:-0}" = "1" ] || {
         note "vault unavailable"; return "$RC_SKIP"; }
     [ -f "$SECRETS_MAP" ] || { note "no secrets.map"; return "$RC_SKIP"; }
@@ -75,5 +76,6 @@ with os.fdopen(fd, "w") as fh:
     [ -n "$_bad" ] && warn "unresolved (missing from vault?):$_bad"
     note "$_ok resolved${_bad:+, unresolved:$_bad}"
     [ "$_ok" -eq 0 ] && return 1
+    DEVTOOLS_SECRETS_READY=1
     return "$RC_OK"
 }

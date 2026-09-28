@@ -1,0 +1,25 @@
+all:
+  children:
+    linux:
+      vars:
+        ansible_user: manbir
+        ansible_python_interpreter: /usr/bin/python3
+      children:
+        servers:
+          hosts:
+            bolde-b200s:
+              ansible_host: bolde-b200s
+            demobox:
+              ansible_host: demobox.asg.ts.net
+            procbox:
+              ansible_host: procbox.agent-trace.ts.net
+        coder_pods:
+          hosts:
+            coder:
+              ansible_host: ws-bolde-workspace-large.asg.ts.net
+              ansible_user: coder
+    macs:
+      hosts:
+        mac:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"

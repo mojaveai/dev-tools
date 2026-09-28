@@ -46,7 +46,7 @@ async function report(command){
     if(!['anchor','challenge'].includes(kind))continue;
     frames.push({kind,...await frame.evaluate(()=>({text:document.body?.innerText,
       checked:document.querySelector('#recaptcha-anchor')?.getAttribute('aria-checked'),
-      recording:!!window.__sharedStop,binding:typeof window.__sharedEmit==='function',
+      recording:!!window.__sharedStop,binding:typeof window.__sharedRecord==='function',
     }))});
   }
   const anchor=frames.find(f=>f.kind==='anchor');

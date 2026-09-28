@@ -18,6 +18,30 @@ export function xauthority(cookie) {
   return Buffer.concat([Buffer.from([255,255]),field(''),field(''),field('MIT-MAGIC-COOKIE-1'),field(cookie)]);
 }
 
+// Cloudflare clearance cookies are bound to the browser fingerprint that solved
+// the challenge. After a binary or version change (for example a profile first
+// used by Chrome for Testing) a stale cf_clearance earns a hard "Sorry, you have
+// been blocked" page rather than a fresh challenge, and deleting it from a
+// running Chrome is not enough. Purge them before launch; sessions are kept.
+export const clearanceCookie=`name IN ('cf_clearance','__cf_bm','_cfuvid') OR name LIKE 'cf\\_chl%' ESCAPE '\\'`;
+export async function purgeClearanceCookies(profile) {
+  let DatabaseSync;
+  try {({DatabaseSync}=await import('node:sqlite'));}
+  catch {console.error('Skipping Cloudflare clearance purge: node:sqlite unavailable');return 0;}
+  let removed=0;
+  const dirs=await fs.readdir(profile,{withFileTypes:true}).catch(()=>[]);
+  for(const dir of dirs.filter(d=>d.isDirectory()))for(const file of ['Cookies','Network/Cookies']){
+    const db=path.join(profile,dir.name,file);
+    if(!await fs.stat(db).then(s=>s.isFile(),()=>false))continue;
+    try {
+      const handle=new DatabaseSync(db);
+      try {removed+=Number(handle.prepare('DELETE FROM cookies WHERE '+clearanceCookie).run().changes);}
+      finally {handle.close();}
+    } catch(error) {console.error('Skipping Cloudflare clearance purge for '+db+': '+error.message);}
+  }
+  return removed;
+}
+
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function freePort() {
   const s=net.createServer();await new Promise((resolve,reject)=>{s.once('error',reject);s.listen(0,'127.0.0.1',resolve);});
@@ -80,6 +104,8 @@ export async function runBrowserHost() {
     const number=await outputLine(display,display.stdio[3],text=>text.match(/^(\d+)\n/)?.[1],'Xvfb');
     display.once('exit',()=>{if(!stopping)void stop(1);});
     const port=await freePort();
+    const purged=await purgeClearanceCookies(path.join(browserData,'profile'));
+    if(purged)console.log(JSON.stringify({event:'clearance-cookies-purged',count:purged}));
     chrome=spawn(executable,[
       '--user-data-dir='+path.join(browserData,'profile'),
       '--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port,

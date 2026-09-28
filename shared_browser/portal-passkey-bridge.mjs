@@ -6,6 +6,7 @@ import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
+import {exposeQuietFunction} from './quiet-binding.mjs';
 import {browserConnection,loopbackEndpoint} from './browser-endpoint.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 if(process.argv[2]==='--check-browser-bundle'){const browser=await puppeteer.connect({browserWSEndpoint:loopbackEndpoint(process.argv[3]),defaultViewport:null});try{const page=await browser.newPage();try{await page.exposeFunction('__canonicalFixture',v=>v);if(await page.evaluate(()=>globalThis.__canonicalFixture('fixture'))!=='fixture')throw Error('Fixture bridge failed');}finally{await page.close();}}finally{browser.disconnect();}console.log('Canonical bundled browser connection verified');process.exit(0);}
@@ -22,8 +23,7 @@ async function attach(page){
  if(attached.has(page))return;attached.add(page);
  const cancelAll=()=>{for(const r of requests.values())if(r.page===page)cancel(r,'Page changed or closed');};
  page.on('framenavigated',frame=>{if(frame===page.mainFrame())cancelAll();});page.on('close',cancelAll);
- for(const name of [names+'Start',names+'Wait',names+'Cancel'])await page.removeExposedFunction(name).catch(()=>{});
- await page.exposeFunction(names+'Start',publicKey=>{
+ await exposeQuietFunction(page,names+'Start',publicKey=>{
    if(new URL(page.url()).origin!==origin || (publicKey.rpId && publicKey.rpId!==new URL(origin).hostname))throw Error('Unsupported passkey origin');
    if(typeof publicKey.challenge!=='string'||publicKey.challenge.length>4096)throw Error('Invalid challenge');
    cancelAll();
@@ -35,8 +35,8 @@ async function attach(page){
    requests.set(id,r);const timer=setTimeout(()=>cancel(r,'Passkey request expired'),120000);timer.unref();
    return id;
  });
- await page.exposeFunction(names+'Wait',async id=>{const r=requests.get(id);if(!r||r.page!==page)throw Error('Unknown request');return r.promise;});
- await page.exposeFunction(names+'Cancel',id=>{const r=requests.get(id);if(r?.page===page)cancel(r);});
+ await exposeQuietFunction(page,names+'Wait',async id=>{const r=requests.get(id);if(!r||r.page!==page)throw Error('Unknown request');return r.promise;});
+ await exposeQuietFunction(page,names+'Cancel',id=>{const r=requests.get(id);if(r?.page===page)cancel(r);});
  await page.evaluateOnNewDocument(hook);await page.evaluate(hook).catch(()=>{});
 }
 const server=http.createServer(async(req,res)=>{

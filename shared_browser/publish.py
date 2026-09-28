@@ -11,7 +11,7 @@ def publish(run=subprocess.run):
                  if host.endswith(':8443')]
     expected = {'/': {'Proxy': 'http://127.0.0.1:8791'}}
     if listeners:
-        if len(listeners) == 1 and listeners[0].get('Handlers') == expected:
+        if len(listeners) == 1 and listeners[0].get('Handlers', {}).get('/') == expected['/']:
             return
         raise RuntimeError('Tailscale Serve port 8443 is occupied; existing routes were preserved')
     if '8443' in current.get('TCP', {}):

@@ -1,0 +1,36 @@
+---
+- name: Restore generated credentials from the controller's approved Proton session
+  hosts: linux
+  gather_facts: true
+  vars:
+    managed_secret_names:
+      - GH_TOKEN
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - ELEVENLABS_API_KEY
+      - OPENROUTER_API_KEY
+  tasks:
+    - name: Require successfully resolved controller credentials
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', item) | length > 0
+          - not lookup('ansible.builtin.env', item).startswith('pass://')
+          - "'<concealed' not in lookup('ansible.builtin.env', item)"
+      loop: "{{ managed_secret_names }}"
+      no_log: true
+
+    - name: Restore the generated environment with restricted permissions
+      ansible.builtin.copy:
+        dest: "{{ devtools_state_dir | default(ansible_facts.user_dir + '/.config/dev-tools') }}/env.sh"
+        content: |
+          # Written by dev-tools. Do not edit; re-run the provisioner instead.
+          {% for name in managed_secret_names %}
+          export {{ name }}={{ lookup('ansible.builtin.env', name) | quote }}
+          {% endfor %}
+          export PROTON_PASS_PERSONAL_ACCESS_TOKEN_FILE={{ ((devtools_state_dir | default(ansible_facts.user_dir + '/.config/dev-tools')) + '/proton-pass.pat') | quote }}
+        mode: '0600'
+        backup: true
+      no_log: true
+
+    - name: Report completed environment restoration
+      ansible.builtin.debug:
+        msg: Generated environment restored from the configured Proton vault references.

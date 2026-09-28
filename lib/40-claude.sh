@@ -24,9 +24,16 @@ mod_claude() {
 
     mkdir -p "$HOME/.claude"
 
+    # Global instructions are owned by dev-tools and safe to replace on reruns.
+    _instructions="$HOME/.claude/CLAUDE.md"
+    _d0=$(file_digest "$_instructions")
+    cp "$REPO_DIR/config/claude/CLAUDE.md" "$_instructions" || return 1
+    chmod 600 "$_instructions"
+    [ "$(file_digest "$_instructions")" = "$_d0" ] || _rc="$RC_UPDATED"
+
     # Merge, never overwrite: the user's own settings live in this file too.
-    json_merge "$HOME/.claude/settings.json" < "$REPO_DIR/config/claude/settings.json"
-    [ $? -eq 10 ] && _rc="$RC_UPDATED"
+    _settings_result=$(python3 "$REPO_DIR/config/claude/apply_settings.py") || return 1
+    [ "$_settings_result" = 'Updated Claude settings' ] && _rc="$RC_UPDATED"
 
     # Keybindings are a separate file with no settings.json equivalent.
     _kb="$HOME/.claude/keybindings.json"

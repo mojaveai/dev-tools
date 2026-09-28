@@ -39,7 +39,7 @@ step() {
     # enrollment, credential provisioning, and daemon setup are separate.
     if [ "$(uname -s)" = Darwin ]; then
         case "$_fn" in
-            mod_base|mod_mosh|mod_tmux|mod_keymaps|mod_desktop_shell|mod_skills|mod_uv|mod_ripgrep) : ;;
+            mod_base|mod_mosh|mod_tmux|mod_passcli|mod_keymaps|mod_desktop_shell|mod_skills|mod_uv|mod_ripgrep) : ;;
             *) printf 'SKIP %s\n' "$_label|Linux host provisioning" >> "$RESULTS"; return 0 ;;
         esac
     fi

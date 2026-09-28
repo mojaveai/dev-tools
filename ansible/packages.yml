@@ -1,0 +1,21 @@
+---
+- name: Read installed package inventory
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Ensure baseline tools and Mosh are installed
+  ansible.builtin.apt:
+    name:
+      - curl
+      - git
+      - jq
+      - tar
+      - python3
+      - keyutils
+      - tmux
+      - mosh
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  when: "(['curl', 'git', 'jq', 'tar', 'python3', 'keyutils', 'tmux', 'mosh'] | difference(ansible_facts.packages.keys() | list) | length) > 0"

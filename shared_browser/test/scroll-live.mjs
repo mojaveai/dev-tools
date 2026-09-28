@@ -44,7 +44,7 @@ try {
   assert.equal(await viewer.$eval('#replay iframe',f=>f.contentWindow.scrollY),500);
   await wait(()=>source.evaluate(()=>scrollY===500),'local scroll forwarded');
   await new Promise(r=>setTimeout(r,1100));
-  await source.evaluate(()=>{window.scrollSamples=0;const emit=window.__sharedEmit;window.__sharedEmit=m=>{if(m.event.type===3 && m.event.data.source===3)scrollSamples++;return emit(m);};});
+  await source.evaluate(()=>{window.scrollSamples=0;const emit=window.__sharedRecord;window.__sharedRecord=m=>{const d=JSON.parse(m);if(d.event.type===3 && d.event.data.source===3)scrollSamples++;return emit(m);};});
   await source.evaluate(async()=>{for(let n=1;n<=30;n++){await new Promise(requestAnimationFrame);scrollTo({top:500+n*20,behavior:'instant'});}});
   await wait(()=>viewer.$eval('#replay iframe',f=>f.contentWindow.scrollY===1100),'source scroll replay');
   assert.ok(await source.evaluate(()=>scrollSamples>=15),'Source scrolling must not be sampled at only 10 Hz');

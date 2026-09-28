@@ -26,7 +26,7 @@ async function report(command){
   const frames=[];
   for(const f of page.frames())frames.push(await f.evaluate(()=>({
     kind:location.pathname.includes('/anchor')?'anchor':location.pathname.includes('/bframe')?'challenge':'top',
-    recording:!!window.__sharedStop,mirror:!!window.__sharedMirror,binding:typeof window.__sharedEmit==='function',
+    recording:!!window.__sharedStop,mirror:!!window.__sharedMirror,binding:typeof window.__sharedRecord==='function',
     text:document.body?.innerText,checked:document.querySelector('#recaptcha-anchor')?.getAttribute('aria-checked'),
     images:[...document.images].map(i=>({loaded:i.complete&&!!i.naturalWidth,width:i.naturalWidth,height:i.naturalHeight})),
     webdriver:navigator.webdriver,viewport:[innerWidth,innerHeight],visibility:document.visibilityState,
