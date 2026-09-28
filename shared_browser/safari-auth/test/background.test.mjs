@@ -10,7 +10,7 @@ const mac=(k,...parts)=>createHmac('sha256',Buffer.from(k,'hex')).update(['dev-t
 function signed(request,{signer=key,viewer=viewerOrigin}={}){
   const payload=JSON.stringify({viewer,...request});return {payload,sig:mac(signer,'request',payload)};
 }
-async function setup({chrome=false,items}={}){
+async function setup({chrome=false,items,site={}}={}){
   let listener,updated,state={},calls=[],tabCalls=[],injected=[];
   const request={id:'abcdef0123456789',origin:'https://auth.nebius.com',kind:'get',publicKey:{challenge:'challenge'},expiresAt:Date.now()+120000};
   const pending=items||[signed(request)];
@@ -22,7 +22,7 @@ async function setup({chrome=false,items}={}){
       remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}},onUpdated:{addListener:fn=>updated=fn}}};
   vm.runInNewContext(source,{...(chrome?{chrome:browser}:{browser}),URL,AbortSignal,TextEncoder,crypto:webcrypto,Uint8Array,
     AUTH_CONFIG:{fleetKey:key},
-    fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/pending')?pending:{delivered:true}};}});
+    fetch:async(url,options)=>{calls.push({url,options});if(!url.includes('/auth-companion/')){const page=site[new URL(url).pathname]||{type:'text/html',body:'<script>app()</script>'};return {type:'basic',status:page.status||200,headers:{get:()=>page.type},text:async()=>page.body};}return {ok:true,json:async()=>url.endsWith('/pending')?pending:{delivered:true}};}});
   const send=(message,sender)=>chrome?new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);}):listener(message,sender);
   return {send,calls,request,tabCalls,injected,updated:(...a)=>updated(...a),state};
 }
@@ -97,4 +97,17 @@ test('popup lists the last viewer and Chrome callback messaging works',async()=>
   assert.equal(listed.viewer,viewerOrigin);assert.equal(listed.requests[0].id,app.request.id);
   assert.equal((await app.send({type:'complete',id:app.request.id,response:{}},approval(app))).delivered,true);
   assert.ok((await app.send({type:'list'},approval(app))).error);
+});
+
+test('approval avoids pages that run site scripts and cross-origin redirects',async()=>{
+  for(const [site,expected] of [
+    [{'/robots.txt':{type:'text/plain',body:'User-agent: *'}},'/robots.txt'],
+    [{'/robots.txt':{status:404,type:'text/html',body:'<h1>Not found</h1>'}},'/robots.txt'],
+    [{'/robots.txt':{status:302,type:'text/html',body:''},'/favicon.ico':{type:'image/x-icon',body:''}},'/favicon.ico'],
+    [{},'/']]){
+    const app=await setup({site});
+    assert.equal((await app.send(open(app),viewer)).opened,true);
+    assert.equal(app.tabCalls.at(-1)[2].url,app.request.origin+expected);
+    assert.ok(app.calls.filter(c=>!c.url.includes('/auth-companion/')).every(c=>c.options.credentials==='omit'&&c.options.redirect==='manual'));
+  }
 });
