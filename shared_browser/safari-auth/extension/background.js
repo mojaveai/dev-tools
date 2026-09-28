@@ -45,6 +45,20 @@ async function pending(viewer) {
   }
   return requests;
 }
+// The site's own page may already hold a WebAuthn request (for example passkey
+// autofill on load), which makes ours fail with "A request is already pending".
+// Approve from a script-free document on the same origin when one exists.
+async function approvalURL(origin) {
+  for (const path of ['/robots.txt', '/favicon.ico', '/.well-known/dev-tools-auth']) {
+    try {
+      const response = await fetch(origin + path, {credentials: 'omit', redirect: 'manual', signal: AbortSignal.timeout(5000)});
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) continue;
+      if (!/html/i.test(response.headers.get('content-type') || '') || !/<script/i.test(await response.text()))
+        return origin + path;
+    } catch {}
+  }
+  return origin + '/';
+}
 const post = async (viewer, action, id, extra = {}) => call(viewer, '/' + action, {id, proof: await proof(action, id), ...extra});
 function sameTab(sender, binding) {
   return binding && sender.frameId === 0 && sender.tab?.id === binding.tabId &&
@@ -87,7 +101,7 @@ async function handleMessage(msg, sender) {
       await api.storage.local.set({lastViewer: source, binding: {tabId: tab.id, viewer: source, request,
         returnURL: viewer ? sender.url : null, autoStart: !!viewer}});
       // The approval script is injected once this tab reaches the site's origin.
-      await api.tabs.update(tab.id, {url: request.origin + '/', active: true});
+      await api.tabs.update(tab.id, {url: await approvalURL(request.origin), active: true});
       return {opened: true};
     }
     const {binding} = await api.storage.local.get('binding');
