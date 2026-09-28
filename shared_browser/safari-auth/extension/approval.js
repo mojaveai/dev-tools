@@ -1,5 +1,7 @@
 (async () => {
-  if (window.top !== window) return;
+  // Injected by the background each time the bound tab loads the site's origin.
+  if (window.top !== window || window.__devToolsAuthApproval) return;
+  window.__devToolsAuthApproval = true;
   let result;
   for (let attempt=0; attempt<10; attempt++) {
     result = await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'ready'});
@@ -14,7 +16,7 @@
   const root = host.attachShadow({mode:'closed'});
   root.innerHTML='<style>article{font:16px system-ui;background:white;color:#17202a;border-radius:18px;padding:32px;max-width:460px;box-shadow:0 10px 45px #0002}h1{font-size:24px}button{padding:12px 18px;margin-right:8px;cursor:pointer}p{overflow-wrap:anywhere}</style><article><h1></h1><p id="site"></p><p id="status">This approves the request in the shared browser. Your passkey stays with your credential provider.</p><button id="approve">Continue with passkey</button><button id="cancel">Cancel</button></article>';
   root.querySelector('h1').textContent=request.kind==='create'?'Create a passkey for the remote browser':'Approve remote sign-in';
-  root.querySelector('#site').textContent=request.origin+' · Request '+request.id.slice(0,8);
+  root.querySelector('#site').textContent=request.origin+' · shared browser on '+new URL(request.viewer).hostname.split('.')[0]+' · Request '+request.id.slice(0,8);
   document.documentElement.append(host);
   const status=root.querySelector('#status'), approve=root.querySelector('#approve'),cancel=root.querySelector('#cancel');
   if(result.returnsToViewer){

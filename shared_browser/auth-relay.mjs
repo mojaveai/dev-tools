@@ -6,10 +6,16 @@ export class AuthRelay {
     Object.assign(this,{origin,origins:[...origins],now,ttl,maxPending});this.requests=new Map();
   }
   start(kind, publicKey, origin=this.origin) {
-    if(!this.origins.includes(origin))throw Error('Unsupported origin');
+    // '*' accepts any HTTPS site: the host's Chromium has already validated the
+    // caller origin and RP before proxying, and the site verifies the response.
+    const any=this.origins.includes('*');
+    if(any ? !/^https:\/\/[^/]+$/.test(origin||'') || new URL(origin).origin!==origin : !this.origins.includes(origin))throw Error('Unsupported origin');
     if (!['create','get'].includes(kind)) throw Error('Unsupported credential operation');
     const rp=kind==='create'?publicKey.rp?.id:publicKey.rpId;
-    if (rp!==new URL(origin).hostname || !publicKey.challenge) throw Error('Invalid relying party');
+    const host=new URL(origin).hostname;
+    // An RP ID may be the origin's host or, for any-site relays, a parent domain.
+    const rpMatches=rp===host || (any && typeof rp==='string' && rp.includes('.') && host.endsWith('.'+rp));
+    if (!rpMatches || !publicKey.challenge) throw Error('Invalid relying party');
     if(this.maxPending===1){for (const r of this.requests.values()) this.cancel(r.id);this.requests.clear();}
     else{
       for(const [id,r]of this.requests)if(r.status!=='pending'||this.now()>=r.expiresAt){this.cancel(id);this.requests.delete(id);}

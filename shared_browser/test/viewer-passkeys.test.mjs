@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await fs.readFile(new URL('../viewer-passkeys.js',import.meta.url),'utf8');
 function element(){return {children:[],dataset:{},style:{},append(...nodes){this.children.push(...nodes);},replaceChildren(){this.children=[];}};}
-test('viewer offers extension approvals for both enabled prototype sites and clears expired requests',()=>{
+test('viewer offers extension approvals for any HTTPS site and clears expired requests',()=>{
  const context=vm.createContext({URL,document:{createElement:element}});
  vm.runInContext(source.replace('export class ViewerPasskeys','class ViewerPasskeys')+';globalThis.Passkeys=ViewerPasskeys;',context);
  const viewer=Object.create(context.Passkeys.prototype);viewer.panel=element();viewer.signature='';
@@ -17,8 +17,11 @@ test('viewer offers extension approvals for both enabled prototype sites and cle
  assert.equal(button.disabled,true); // Only the trusted extension enables approval.
  viewer.update([{...request,origin:'https://cryptoagent-1-1.agent-trace.ts.net:3581'}]);
  assert.equal(viewer.panel.children.length,1);
- viewer.update([{...request,origin:'https://demo.yubico.com.evil.example'}]);
- assert.equal(viewer.panel.children.length,0);
+ viewer.update([{...request,origin:'https://auth.nebius.com'}]);
+ assert.equal(viewer.panel.children.length,1);
+ for(const origin of ['http://demo.yubico.com','https://demo.yubico.com/path','javascript:alert(1)',undefined]){
+  viewer.update([{...request,origin}]);assert.equal(viewer.panel.children.length,0);
+ }
  viewer.update([{...request,expiresAt:1}]);assert.equal(viewer.panel.children.length,0);
  viewer.update([]);assert.equal(viewer.panel.children.length,0);
 });

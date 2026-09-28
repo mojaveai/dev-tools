@@ -1,5 +1,10 @@
 # Safari authentication companion: Mac pilot
 
+> **Superseded (2026-09-28):** passkey approval now runs per host on every shared
+> browser with Mac Chrome/Safari extensions and no Mac relay or tunnels. See
+> [docs/shared-browser-passkeys.md](../../docs/shared-browser-passkeys.md). The notes
+> below are the historical prototype record; the scripts they name were removed.
+
 **Update:** the user subsequently enabled the extension path specifically for the
 new cryptoagent dashboard. See [dashboard setup and rollback](DASHBOARD-SETUP.md).
 The broader arbitrary-site/iPhone work remains a prototype. Historical parking

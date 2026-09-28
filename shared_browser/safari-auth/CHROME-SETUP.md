@@ -1,5 +1,10 @@
 # Chrome approval client on macOS
 
+> **Superseded (2026-09-28):** passkey approval now runs per host on every shared
+> browser with Mac Chrome/Safari extensions and no Mac relay or tunnels. See
+> [docs/shared-browser-passkeys.md](../../docs/shared-browser-passkeys.md). The notes
+> below are the historical prototype record; the scripts they name were removed.
+
 Use local Chrome to approve requests from procbox with a YubiKey, Touch ID, or
 another credential available in Chrome. The companion retains the same explicit
 cryptoagent and Yubico origin allowlist as Safari. The target site must already

@@ -31,11 +31,15 @@ File inputs support human uploads from the viewer and agent uploads via
 the viewer's collapsed Downloads section. `tab.getDownloads()` provides agent
 paths. Limits: 10 files, 10 MB each, 20 MB per upload batch.
 
-On procbox, Agent Trace QA passkey requests appear above the viewer with an
-Approve with passkey link. The user opens it on their own device, verifies with
-their registered authenticator, and returns to the viewer. Verify the portal
-actually signed in before reporting success. This is a site-specific adapter,
-not universal passkey forwarding; demobox does not have that portal adapter.
+When a site in the shared browser asks for a passkey (sign-in or registration),
+the viewer shows **Approve with passkey** on every dev-tools host. Tell the user;
+they click it in the viewer, approve at the real site with Touch ID, a YubiKey or
+another passkey on their Mac (Chrome or Safari with the Dev Tools Auth extension),
+and return to the viewer automatically. Wait for them, then confirm from the page
+that the site actually signed in; delivery alone is not success. Requests expire
+after two minutes. If the button says to enable Dev Tools Auth, the user's
+extension is not loaded in that browser. On procbox, Agent Trace QA sign-ins
+still use their separate approval link.
 Never request passwords, passkey private material, or biometric data in chat.
 
 If tools are absent, reconnect MCP or start a new agent session. Diagnose with
