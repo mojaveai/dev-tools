@@ -109,6 +109,20 @@ class InstallTests(unittest.TestCase):
             if not matching:
                 self.assertEqual(calls[1], ['tailscale', 'serve', '--bg', '--https=8443', 'http://127.0.0.1:8791'])
 
+    def test_publish_preserves_extra_routes_on_owned_listener(self):
+        import json
+        current = {'Web': {'host:8443': {'Handlers': {
+            '/': {'Proxy': 'http://127.0.0.1:8791'},
+            '/desktop': {'Proxy': 'http://127.0.0.1:8793'},
+            '/passkey': {'Proxy': 'http://127.0.0.1:8795'},
+        }}}}
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(current))
+        publication.publish(run)
+        self.assertEqual(len(calls), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

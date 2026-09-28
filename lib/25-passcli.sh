@@ -1,10 +1,10 @@
 #!/bin/sh
-# Proton Pass CLI: install, then leave this machine holding a SCOPED session.
+# Proton Pass CLI: full user session on Mac, scoped PAT on Linux hosts.
 #
-# Privilege de-escalation. A human login is full-vault, which is more than a dev
-# box should keep. So the full session is used only long enough to mint a scoped,
-# expiring, per-machine token -- then it is logged out and the token is used
-# instead. What persists on disk is only ever the scoped credential.
+# Linux privilege de-escalation. A human login is full-vault, which is more
+# than an unattended dev box should keep. Linux uses it only to mint a scoped,
+# expiring, per-machine token, then logs out. User Macs retain the full login
+# so their owners can create secrets and access all of their vaults.
 #
 #   pass-cli login                 human approves a link      (full vault)
 #   pass-cli pat create            mint dev-<host>, expiring
@@ -117,7 +117,11 @@ pass_auth_diagnose() {
 
 passcli_install_or_update() {
     if have pass-cli; then
-        PROTON_PASS_NO_UPDATE_CHECK=1 pass-cli update -y >/dev/null 2>&1 || true
+        # Updating the Mac CLI while its full user session is active can
+        # invalidate that session. Let its own updater run outside bootstrap.
+        if [ "$(uname -s)" != Darwin ]; then
+            PROTON_PASS_NO_UPDATE_CHECK=1 pass-cli update -y >/dev/null 2>&1 || true
+        fi
         return 0
     fi
     info "installing pass-cli"
@@ -139,9 +143,17 @@ passcli_install_or_update() {
 pass_login_interactive() {
     printf '\n'
     printf '%s  Proton Pass needs you to approve this machine.%s\n' "$C_BLD" "$C_RESET"
-    printf '  Open the link it prints below and sign in. This full-vault session is\n'
-    printf '  used only to mint a scoped token, then dropped.\n\n'
-    PROTON_PASS_KEY_PROVIDER=fs timeout "$PASS_LOGIN_TIMEOUT" pass-cli login
+    if [ "$(uname -s)" = Darwin ]; then
+        printf '  Open the link it prints below. This Mac retains the full user vault session.\n\n'
+    else
+        printf '  Open the link it prints below and sign in. This full-vault session is\n'
+        printf '  used only to mint a scoped token, then dropped.\n\n'
+    fi
+    if have timeout; then
+        PROTON_PASS_KEY_PROVIDER=fs timeout "$PASS_LOGIN_TIMEOUT" pass-cli login
+    else
+        PROTON_PASS_KEY_PROVIDER=fs pass-cli login
+    fi
     _rc=$?
     printf '\n'
     [ "$_rc" -eq 124 ] && { err "timed out waiting for Proton Pass approval"; return 1; }
@@ -277,6 +289,27 @@ mod_passcli() {
     passcli_install_or_update || { note "install failed"; return 1; }
     have pass-cli || { err "pass-cli not on PATH after install"; return 1; }
     _after=$(pass-cli --version 2>/dev/null || echo '')
+
+    if [ "$(uname -s)" = Darwin ]; then
+        # A Mac is a user machine. Keep the full session created at bootstrap;
+        # never mint a codex-only PAT, log the user out, or load an old PAT.
+        if pass_authenticated; then
+            DEVTOOLS_PASS_READY=1; export DEVTOOLS_PASS_READY
+            note "full user vault session active${_after:+, $_after}"
+            [ "$_before" = "$_after" ] && return "$RC_OK"
+            return "$RC_UPDATED"
+        fi
+        [ "${DEVTOOLS_PASS_DIAG:-0}" = 1 ] && pass_auth_diagnose
+        if [ "${DEVTOOLS_NONINTERACTIVE:-0}" = 1 ] || ! ( true < /dev/tty ) 2>/dev/null; then
+            note "full user vault login needed interactively"
+            return "$RC_SKIP"
+        fi
+        pass_login_interactive || { note "full user vault login failed"; return 1; }
+        pass_authenticated || { note "full user vault session unavailable after login"; return 1; }
+        DEVTOOLS_PASS_READY=1; export DEVTOOLS_PASS_READY
+        note "full user vault session ready"
+        return "$RC_UPDATED"
+    fi
 
     # An environment-supplied token wins and persists (unattended provisioning).
     if [ -n "${PROTON_PASS_PERSONAL_ACCESS_TOKEN:-}" ]; then

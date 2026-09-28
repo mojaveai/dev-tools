@@ -1,0 +1,229 @@
+---
+- name: Deploy and converge dev-tools
+  hosts: all
+  gather_facts: true
+  vars:
+    devtools_home: "{{ ansible_facts.user_dir }}/.local/share/dev-tools"
+    devtools_release: "{{ ansible_facts.user_dir }}/.local/share/dev-tools-releases/{{ release_id }}"
+    devtools_path: "{{ ansible_facts.user_dir | default('/tmp') }}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:{{ (ansible_facts.env | default({})).PATH | default('/usr/bin:/bin:/usr/sbin:/sbin') }}"
+  environment:
+    PATH: "{{ devtools_path }}"
+  tasks:
+    - name: Validate controller release parameters
+      ansible.builtin.assert:
+        that:
+          - release_id is match('^[a-f0-9]{64}$')
+          - release_archive is defined
+      tags: always
+
+    - name: Manage Debian baseline packages with Ansible
+      ansible.builtin.include_tasks: packages.yml
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Create release directory
+      ansible.builtin.file:
+        path: "{{ devtools_release }}"
+        state: directory
+        mode: '0755'
+
+    - name: Inspect release completion marker
+      ansible.builtin.stat:
+        path: "{{ devtools_release }}/.release-id"
+      register: release_marker
+
+    - name: Unpack the controller's exact runtime snapshot
+      ansible.builtin.unarchive:
+        src: "{{ release_archive }}"
+        dest: "{{ devtools_release }}"
+      when: not release_marker.stat.exists and not ansible_check_mode and ansible_facts.system != 'Darwin'
+
+    - name: Stage release for macOS BSD tar
+      ansible.builtin.copy:
+        src: "{{ release_archive }}"
+        dest: "{{ devtools_release }}/.source.tar.gz"
+        mode: '0600'
+      when: not release_marker.stat.exists and not ansible_check_mode and ansible_facts.system == 'Darwin'
+
+    - name: Extract release with macOS BSD tar
+      ansible.builtin.command:
+        argv: [/usr/bin/tar, -xzf, "{{ devtools_release }}/.source.tar.gz", -C, "{{ devtools_release }}"]
+      when: not release_marker.stat.exists and not ansible_check_mode and ansible_facts.system == 'Darwin'
+
+    - name: Remove macOS transfer archive
+      ansible.builtin.file:
+        path: "{{ devtools_release }}/.source.tar.gz"
+        state: absent
+      when: not ansible_check_mode and ansible_facts.system == 'Darwin'
+
+    - name: Mark complete release
+      ansible.builtin.copy:
+        content: "{{ release_id }}\n"
+        dest: "{{ devtools_release }}/.release-id"
+        mode: '0644'
+      when: not ansible_check_mode
+
+    - name: Inspect previous installation
+      ansible.builtin.stat:
+        path: "{{ devtools_home }}"
+        follow: false
+      register: previous_install
+
+    - name: Preserve installation before adopting release layout
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ devtools_home }}"
+          - "{{ devtools_home }}.pre-ansible-{{ ansible_facts.date_time.epoch }}"
+      when: previous_install.stat.exists and not previous_install.stat.islnk
+
+    - name: Activate release
+      ansible.builtin.file:
+        src: "{{ devtools_release }}"
+        dest: "{{ devtools_home }}"
+        state: link
+        force: true
+      when: not ansible_check_mode
+
+    - name: Create launcher directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts.user_dir }}/.local/bin"
+        state: directory
+        mode: '0755'
+
+    - name: Install launcher
+      ansible.builtin.file:
+        src: "{{ devtools_home }}/bin/dev-tools"
+        dest: "{{ ansible_facts.user_dir }}/.local/bin/dev-tools"
+        state: link
+      when: not ansible_check_mode
+
+    - name: Install managed global Claude instructions
+      ansible.builtin.file:
+        path: "{{ ansible_facts.user_dir }}/.claude"
+        state: directory
+        mode: '0700'
+      when: not ansible_check_mode
+
+    - name: Copy managed global Claude instructions
+      ansible.builtin.copy:
+        src: "{{ devtools_release }}/config/claude/CLAUDE.md"
+        remote_src: true
+        dest: "{{ ansible_facts.user_dir }}/.claude/CLAUDE.md"
+        mode: '0600'
+      when: not ansible_check_mode
+
+    - name: Set Claude Code native auto-updates to latest on Mac
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - "{{ devtools_release }}/config/claude/apply_settings.py"
+      register: claude_settings_result
+      changed_when: "'Updated' in claude_settings_result.stdout"
+      when: ansible_facts.system == 'Darwin' and not ansible_check_mode
+
+    - name: Remove remote browser routing from local Mac
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - "{{ devtools_release }}/shared_browser/local_host.py"
+      register: local_browser_result
+      changed_when: "'Removed remote' in local_browser_result.stdout"
+      when: ansible_facts.system == 'Darwin' and not ansible_check_mode
+
+    - name: Adopt maintained skills for both agent clients
+      ansible.builtin.include_tasks: skills.yml
+      loop:
+        - .codex/skills/proton-pass
+        - .claude/skills/proton-pass
+        - .codex/skills/shared-browser
+        - .claude/skills/shared-browser
+        - .codex/skills/nebius
+        - .claude/skills/nebius
+      loop_control:
+        loop_var: skill_target
+
+    - name: Inspect conventional tmux configuration
+      ansible.builtin.stat:
+        path: "{{ ansible_facts.user_dir }}/.tmux.conf"
+      register: tmux_conventional
+
+    - name: Inspect XDG tmux configuration
+      ansible.builtin.stat:
+        path: "{{ ansible_facts.env.XDG_CONFIG_HOME | default(ansible_facts.user_dir + '/.config') }}/tmux/tmux.conf"
+      register: tmux_xdg
+
+    - name: Configure tmux scrolling
+      ansible.builtin.blockinfile:
+        path: "{{ devtools_tmux_config | default((ansible_facts.env.XDG_CONFIG_HOME | default(ansible_facts.user_dir + '/.config')) + '/tmux/tmux.conf' if not tmux_conventional.stat.exists and tmux_xdg.stat.exists else ansible_facts.user_dir + '/.tmux.conf') }}"
+        create: true
+        mode: '0600'
+        marker: '# {mark} dev-tools:tmux-mouse'
+        block: |
+          # Scroll up to enter history automatically; scroll down to the bottom to exit.
+          set -g mouse on
+
+    - name: Inspect running tmux mouse setting
+      ansible.builtin.command: tmux show-options -gv mouse
+      register: tmux_mouse
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Enable scrolling in existing tmux server
+      ansible.builtin.command: tmux set-option -g mouse on
+      when: tmux_mouse.rc == 0 and tmux_mouse.stdout != 'on'
+
+    - name: Converge specialized host integrations
+      throttle: 1
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - "{{ devtools_home }}/provision.sh"
+          - --non-interactive
+          - --skip
+          - "mod_skills mod_tmux{{ ' mod_base mod_mosh' if ansible_facts.os_family == 'Debian' else '' }}"
+      register: provision_result
+      # Authentication commands can include private output. Publish only the
+      # provisioner's final status labels, never its raw transcript.
+      no_log: true
+      changed_when: "'UPDATED' in provision_result.stdout"
+      failed_when: false
+      when: not ansible_check_mode and not (devtools_deploy_only | default(false) | bool)
+
+    - name: Publish integration status labels
+      ansible.builtin.debug:
+        msg: "{{ provision_result.stdout | regex_findall('(?m)^  (OK|UPDATED|SKIP|FAIL) +([a-z][a-z0-9 -]*?) {2,}') }}"
+      when: not ansible_check_mode and not (devtools_deploy_only | default(false) | bool)
+
+    - name: Verify Proton using the installed agent helper
+      throttle: 1
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - "{{ ansible_facts.user_dir }}/.codex/skills/proton-pass/scripts/access.py"
+          - authenticated-exec
+          - --reason
+          - Verify Proton access after the user-authorized Ansible fleet deployment.
+          - --
+          - vault
+          - list
+      register: proton_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: not ansible_check_mode and not (devtools_deploy_only | default(false) | bool)
+
+    - name: Record non-sensitive deployment health
+      ansible.builtin.copy:
+        content: "{{ {'release': release_id, 'provision_ok': provision_result.rc == 0, 'proton_ok': proton_result.rc == 0} | to_nice_json }}\n"
+        dest: "{{ ansible_facts.user_dir }}/.local/share/dev-tools-health.json"
+        mode: '0600'
+      when: not ansible_check_mode and not (devtools_deploy_only | default(false) | bool)
+
+    - name: Require successful convergence and agent authentication
+      ansible.builtin.assert:
+        that:
+          - provision_result.rc == 0
+          - proton_result.rc == 0
+        fail_msg: "Configuration deployed; integrations or Proton need attention. See status labels above and run targeted host enrollment if required."
+      when: not ansible_check_mode and not (devtools_deploy_only | default(false) | bool)

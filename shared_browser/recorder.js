@@ -10,11 +10,14 @@ const generation = crypto.randomUUID();
 window.__sharedRecorderToken = generation;
 window.__sharedGeneration = generation;
 window.__sharedMirror = record.mirror;
+// Protocol 2 sends JSON strings through the __sharedRecord CDP binding.
+window.__sharedRecorderProtocol = 2;
 function start() {
   if (window.__sharedRecorderToken !== generation || window.__sharedStop) return;
   window.__sharedStop = record({
     emit(event) {
-      window.__sharedEmit({ generation, event }).catch(() => {});
+      // A CDP binding takes one string argument and returns nothing.
+      try { window.__sharedRecord(JSON.stringify({ generation, event })); } catch {}
     },
     inlineStylesheet: true,
     inlineImages: true,

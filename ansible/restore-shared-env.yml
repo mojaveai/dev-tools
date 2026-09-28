@@ -1,0 +1,58 @@
+---
+# Recovery for hosts using the same config/secrets.map. This transfers only the
+# four deliberately shared application credentials, never per-host Proton PATs.
+- name: Read the known-good generated shared environment
+  hosts: procbox
+  gather_facts: true
+  tasks:
+    - name: Check that source uses this checkout's vault reference map
+      ansible.builtin.stat:
+        path: "{{ ansible_facts.user_dir }}/.local/share/dev-tools/config/secrets.map"
+      register: reference_map
+
+    - name: Require matching credential provenance
+      ansible.builtin.assert:
+        that:
+          - reference_map.stat.checksum == (lookup('ansible.builtin.file', playbook_dir + '/../config/secrets.map', rstrip=false) | hash('sha1'))
+
+    - name: Read only the four shared application credentials
+      ansible.builtin.shell:
+        cmd: |
+          . "$HOME/.config/dev-tools/env.sh"
+          python3 -c 'import json,os; print(json.dumps({k:os.environ[k] for k in ["GH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN","ELEVENLABS_API_KEY","OPENROUTER_API_KEY"]}))'
+        executable: /bin/sh
+      register: shared_environment
+      changed_when: false
+      no_log: true
+      check_mode: false
+
+- name: Restore only the affected generated environments
+  hosts: bolde-b200s:demobox
+  gather_facts: true
+  vars:
+    restored_values: "{{ hostvars['procbox'].shared_environment.stdout | from_json }}"
+  tasks:
+    - name: Validate shared values before any write
+      ansible.builtin.assert:
+        that:
+          - item.value | length > 0
+          - not item.value.startswith('pass://')
+      loop: "{{ restored_values | dict2items }}"
+      no_log: true
+
+    - name: Restore application credentials and preserve the local Proton path
+      ansible.builtin.copy:
+        dest: "{{ ansible_facts.user_dir }}/.config/dev-tools/env.sh"
+        content: |
+          # Written by dev-tools. Do not edit; re-run the provisioner instead.
+          {% for name, value in restored_values.items() %}
+          export {{ name }}={{ value | quote }}
+          {% endfor %}
+          export PROTON_PASS_PERSONAL_ACCESS_TOKEN_FILE={{ (ansible_facts.user_dir + '/.config/dev-tools/proton-pass.pat') | quote }}
+        mode: '0600'
+        backup: true
+      no_log: true
+
+    - name: Confirm restoration without displaying values
+      ansible.builtin.debug:
+        msg: Restored four shared application credentials; the host's Proton PAT was not copied or changed.

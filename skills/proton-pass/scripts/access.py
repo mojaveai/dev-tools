@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -20,6 +21,8 @@ _CREDENTIAL_ROOT = Path.home() / ".codex" / "agent-credentials"
 _PAT_PATH = _CREDENTIAL_ROOT / "proton-pass.pat"
 _AUDIT_PATH = _CREDENTIAL_ROOT / "proton-pass-access.jsonl"
 _SESSION_PATH = _CREDENTIAL_ROOT / "proton-pass-session"
+_USE_USER_SESSION = False
+_USER_SESSION_PATH = Path.home() / ".config" / "dev-tools" / "proton-pass-session"
 _PAT_RE = re.compile(r"^pst_[A-Za-z0-9_-]+::[A-Za-z0-9_-]+$")
 _SECRET_IN_REASON_RE = re.compile(r"pst_[A-Za-z0-9_-]+::[A-Za-z0-9_-]+")
 _BLOCKED_PREFIXES = (
@@ -73,27 +76,44 @@ def _pass_cli() -> str:
 def _environment_with_reason(reason: str) -> dict[str, str]:
     """Bind the audited purpose to Proton Pass's native agent-session contract."""
 
-    _SESSION_PATH.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _SESSION_PATH.chmod(0o700)
     environment = os.environ.copy()
     environment["PROTON_PASS_AGENT_REASON"] = reason
+    if _USE_USER_SESSION:
+        _USER_SESSION_PATH.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _USER_SESSION_PATH.chmod(0o700)
+        environment["PROTON_PASS_SESSION_DIR"] = str(_USER_SESSION_PATH)
+        environment["PROTON_PASS_KEY_PROVIDER"] = "fs"
+        return environment
+    _SESSION_PATH.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _SESSION_PATH.chmod(0o700)
     environment["PROTON_PASS_SESSION_DIR"] = str(_SESSION_PATH)
     return environment
 
 
 def _read_pat() -> str:
+    explicit = os.environ.get("PROTON_PASS_PERSONAL_ACCESS_TOKEN_FILE")
+    state = Path(os.environ.get("DEVTOOLS_STATE_DIR", str(Path.home() / ".config/dev-tools")))
+    provisioned = state / "proton-pass.pat"
+    if explicit:
+        path = Path(explicit).expanduser()
+    elif sys.platform == "darwin":
+        raise AccessError("Mac credential access requires the full user session or an explicit PAT file")
+    elif provisioned.exists() or provisioned.is_symlink() or "DEVTOOLS_STATE_DIR" in os.environ:
+        path = provisioned
+    else:
+        path = _PAT_PATH
     try:
-        metadata = _PAT_PATH.lstat()
+        metadata = path.lstat()
     except OSError as exc:
-        raise AccessError(f"agent PAT is unavailable at {_PAT_PATH}") from exc
-    if not stat.S_ISREG(metadata.st_mode) or _PAT_PATH.is_symlink():
+        raise AccessError(f"agent PAT is unavailable at {path}") from exc
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
         raise AccessError("agent PAT must be an ordinary, non-symlinked file")
     if metadata.st_uid != os.getuid():
         raise AccessError("agent PAT must be owned by the current workspace user")
     if metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise AccessError("agent PAT must not grant group or other permissions")
     try:
-        value = _PAT_PATH.read_text(encoding="utf-8").strip()
+        value = path.read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise AccessError("agent PAT could not be read") from exc
     if not _PAT_RE.fullmatch(value):
@@ -215,8 +235,8 @@ def authenticate(reason: str) -> int:
     result = "failed"
     try:
         existing_session = subprocess.run(
-            [_pass_cli(), "test"],
-            stdin=subprocess.DEVNULL,
+            [_pass_cli(), "info"],
+            stdin=None if _USE_USER_SESSION else subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=_environment_with_reason(reason),
@@ -226,20 +246,40 @@ def authenticate(reason: str) -> int:
             result = "success"
             print("pass_cli_authenticated=true")
             return 0
+        if _USE_USER_SESSION:
+            print('ERROR: Existing Mac user session could not be verified; sign in interactively.', file=sys.stderr)
+            return 1
         pat = _read_pat()
+        environment = _environment_with_reason(reason)
+        environment["PROTON_PASS_PERSONAL_ACCESS_TOKEN"] = pat
+        # Reset only the helper's own session, never the user's default store.
+        subprocess.run(
+            [_pass_cli(), "logout", "--force"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env=environment, check=False,
+        )
         login = subprocess.run(
-            [_pass_cli(), "login", "--pat", pat],
+            [_pass_cli(), "login"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=_environment_with_reason(reason),
+            stderr=subprocess.PIPE,
+            env=environment,
             check=False,
         )
         del pat
         if login.returncode != 0:
+            diagnostic = (login.stderr or b'').decode(errors='replace').lower()
+            category = 'login rejected'
+            if 'timed out' in diagnostic or 'timeout' in diagnostic:
+                category = 'network timeout'
+            elif '429' in diagnostic or 'too many requests' in diagnostic:
+                category = 'rate limited'
+            elif 'expired' in diagnostic or 'invalid' in diagnostic:
+                category = 'credential expired or invalid'
+            print(f'ERROR: Proton authentication failed ({category})', file=sys.stderr)
             return 1
         test = subprocess.run(
-            [_pass_cli(), "test"],
+            [_pass_cli(), "info"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -300,18 +340,38 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    global _SESSION_PATH, _USE_USER_SESSION
     args = parse_args(argv)
     try:
         reason = _validate_reason(args.reason)
+        if sys.platform == "darwin" and not os.environ.get("PROTON_PASS_PERSONAL_ACCESS_TOKEN_FILE"):
+            # Desktop users own a full login. Reuse it without touching its
+            # database, logging it out, or copying its credentials.
+            _USE_USER_SESSION = True
+            environment = _environment_with_reason(reason)
+            probe = subprocess.run([_pass_cli(), "info"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   env=environment, check=False)
+            _audit("user-session-check", reason, "success" if probe.returncode == 0 else "failed")
+            if probe.returncode != 0:
+                raise AccessError('Mac user Proton session is unavailable; run provision.sh --only mod_passcli interactively')
         if args.command == "authenticate":
             return authenticate(reason)
         if args.command == "exec":
             return execute(reason, list(args.pass_args))
         if args.command == "authenticated-exec":
-            authenticated = authenticate(reason)
-            if authenticated != 0:
-                return authenticated
-            return execute(reason, list(args.pass_args))
+            # One isolated database and key lifetime per operation, including
+            # containers that prohibit kernel keyring syscalls.
+            _validate_command(list(args.pass_args))
+            if _USE_USER_SESSION:
+                return execute(reason, list(args.pass_args))
+            with tempfile.TemporaryDirectory(prefix="devtools-pass-agent-") as session:
+                _SESSION_PATH = Path(session)
+                os.environ["PROTON_PASS_KEY_PROVIDER"] = "fs"
+                authenticated = authenticate(reason)
+                if authenticated != 0:
+                    return authenticated
+                return execute(reason, list(args.pass_args))
         if args.command == "field-names":
             return inspect_field_names(reason, args.share_id, args.item_id)
     except AccessError as exc:

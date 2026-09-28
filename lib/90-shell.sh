@@ -5,6 +5,12 @@ mod_shell() {
     _rc="$RC_OK"
     ensure_dirs
     _envf="$STATE_DIR/env.sh"
+    # An unattended run may encounter a temporary vault outage. Keep the last
+    # working environment instead of replacing it with an empty set of secrets.
+    if [ -f "$_envf" ] && [ "${DEVTOOLS_SECRETS_READY:-0}" != 1 ]; then
+        note "existing environment preserved; secrets were not refreshed"
+        return "$RC_SKIP"
+    fi
 
     # Secrets go in a 0600 file rather than into .bashrc or settings.json, so
     # neither the shell profile nor any tracked config carries a credential.

@@ -6,7 +6,21 @@ import sys
 from pathlib import Path
 
 repo = Path(__file__).resolve().parent.parent
-if len(sys.argv) > 1 and sys.argv[1] == "keymap":
+if len(sys.argv) > 1 and sys.argv[1] == "repair-env":
+    import shutil
+    ansible = shutil.which("ansible-playbook")
+    if not ansible:
+        sys.exit("Install Ansible on this controller first.")
+    os.environ["ANSIBLE_CONFIG"] = str(repo / "ansible/ansible.cfg")
+    os.execv(sys.executable, [sys.executable,
+        str(repo / "skills/proton-pass/scripts/access.py"), "authenticated-exec",
+        "--reason", "Restore development host environment credentials from the configured Proton vault references.",
+        "--", "run", "--env-file", str(repo / "config/secrets.map"), "--",
+        ansible, "-i", str(repo / "ansible/inventory.yml"),
+        str(repo / "ansible/repair-env.yml"), *sys.argv[2:]])
+elif len(sys.argv) > 1 and sys.argv[1] == "apply":
+    os.execv(sys.executable, [sys.executable, str(repo / "fleet/deploy.py"), *sys.argv[2:]])
+elif len(sys.argv) > 1 and sys.argv[1] == "keymap":
     os.execv("/bin/sh", ["sh", str(repo / "config/apply-keymaps.sh"), *sys.argv[2:]])
 elif len(sys.argv) > 1 and sys.argv[1] == "native-browser":
     sys.path.insert(0, str(repo / "native_browser"))
