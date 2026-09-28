@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {AuthRelay} from '../relay.mjs';
+import {AuthRelay} from '../auth-relay.mjs';
 const origin='http://localhost:8812';
 function setup(){let now=0;const relay=new AuthRelay({origin,now:()=>now});const r=relay.start('get',{rpId:'localhost',challenge:'one',allowCredentials:[{id:'key'}]});r.promise.catch(()=>{});return {relay,r,expire:()=>now=120000};}
 function response(changes={}){return {type:'public-key',id:'key',response:{clientDataJSON:Buffer.from(JSON.stringify({type:'webauthn.get',origin,challenge:'one',crossOrigin:false,...changes})).toString('base64url')}};}
@@ -31,4 +31,13 @@ test('multiple approved sites stay isolated by origin and relying party',async()
  assert.throws(()=>relay.complete(requests[1].id,response({origin:origins[0]})),/does not match/);
  for(let i=0;i<requests.length;i++){relay.complete(requests[i].id,response({origin:origins[i]}));await requests[i].promise;}
  assert.equal(relay.list().length,0);
+});
+
+test('any-site relay accepts HTTPS origins and parent-domain RP IDs only',async()=>{
+ const relay=new AuthRelay({origins:['*'],maxPending:16});
+ const ok=relay.start('get',{rpId:'nebius.com',challenge:'one'},'https://auth.nebius.com');ok.promise.catch(()=>{});
+ const exact=relay.start('create',{rp:{id:'github.com'},challenge:'one'},'https://github.com');exact.promise.catch(()=>{});
+ for(const [rpId,origin] of [['evil.com','https://auth.nebius.com'],['com','https://auth.nebius.com'],['nebius.com','http://auth.nebius.com'],['nebius.com','https://auth.nebius.com/path']])
+  assert.throws(()=>relay.start('get',{rpId,challenge:'one'},origin),/Unsupported origin|relying party/);
+ relay.cancel(ok.id);relay.cancel(exact.id);
 });

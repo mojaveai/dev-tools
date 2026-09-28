@@ -1,73 +1,104 @@
-/* The generated config contains a disposable relay capability, never a passkey. */
+/* Local passkey approval client for dev-tools shared browsers.
+ * A request is trusted only if one of the owner's hosts signed it with the
+ * fleet key for the exact viewer origin it came from; a look-alike viewer on
+ * the tailnet cannot produce that signature. The key never leaves this
+ * extension or those hosts, and no passkey material passes through it. */
 const api = globalThis.browser || globalThis.chrome;
-async function relay(path, body) {
-  const token = AUTH_CONFIG.mobile ? (await api.storage.local.get('mobileToken')).mobileToken : AUTH_CONFIG.token;
-  if(!token)throw Error('Pair this iPhone in Dev Tools Auth first.');
-  const response = await fetch(AUTH_CONFIG.relay + path, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-    signal:AbortSignal.timeout(10000),
+const encoder = new TextEncoder();
+let fleetKey;
+function importKey() {
+  const bytes = new Uint8Array(AUTH_CONFIG.fleetKey.match(/../g).map(pair => parseInt(pair, 16)));
+  return fleetKey ||= crypto.subtle.importKey('raw', bytes, {name:'HMAC', hash:'SHA-256'}, false, ['sign', 'verify']);
+}
+const message = (...parts) => encoder.encode(['dev-tools-auth', ...parts].join('\n'));
+const hex = buffer => [...new Uint8Array(buffer)].map(b => b.toString(16).padStart(2, '0')).join('');
+async function proof(action, id) { return hex(await crypto.subtle.sign('HMAC', await importKey(), message(action, id))); }
+async function signedByFleet(payload, sig) {
+  if (typeof payload !== 'string' || !/^[a-f0-9]{64}$/.test(sig || '')) return false;
+  const bytes = new Uint8Array(sig.match(/../g).map(pair => parseInt(pair, 16)));
+  return crypto.subtle.verify('HMAC', await importKey(), bytes, message('request', payload));
+}
+// Shared viewers are served by Tailscale at https://<host>.ts.net:8443/.
+// The name only routes the request; the signature establishes the host.
+function viewerOrigin(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.port === '8443' && u.hostname.endsWith('.ts.net') && u.pathname === '/' ? u.origin : null;
+  } catch { return null; }
+}
+async function call(viewer, path, body) {
+  const response = await fetch(viewer + '/auth-companion' + path, {
+    method: body === undefined ? 'GET' : 'POST', credentials: 'omit', redirect: 'error',
+    headers: {'Content-Type': 'application/json'}, signal: AbortSignal.timeout(10000),
     ...(body === undefined ? {} : {body: JSON.stringify(body)}),
   });
   const data = await response.json();
-  if (!response.ok) throw Error(data.error || 'Relay unavailable');
+  if (!response.ok) throw Error(data.error || 'Shared browser unavailable');
   return data;
 }
+async function pending(viewer) {
+  const requests = [];
+  for (const item of await call(viewer, '/pending')) {
+    if (!await signedByFleet(item?.payload, item?.sig)) continue;
+    const request = JSON.parse(item.payload);
+    if (request.viewer === viewer && Date.now() < request.expiresAt) requests.push(request);
+  }
+  return requests;
+}
+const post = async (viewer, action, id, extra = {}) => call(viewer, '/' + action, {id, proof: await proof(action, id), ...extra});
 function sameTab(sender, binding) {
   return binding && sender.frameId === 0 && sender.tab?.id === binding.tabId &&
     new URL(sender.url).origin === binding.request.origin;
 }
 async function returnToViewer(binding) {
-  if (!binding.returnURL) return;
-  const url = new URL(binding.returnURL);
-  if (url.origin !== 'https://procbox.agent-trace.ts.net:8443' || url.pathname !== '/') return;
+  if (!binding.returnURL || viewerOrigin(binding.returnURL) !== binding.viewer) return;
   const tab = await api.tabs.get(binding.tabId).catch(() => null);
   if (tab?.url && new URL(tab.url).origin === binding.request.origin)
-    await api.tabs.update(binding.tabId, {url:url.href, active:true});
+    await api.tabs.update(binding.tabId, {url:binding.returnURL, active:true});
 }
-async function handleMessage(message, sender) {
+async function release(binding) {
+  await post(binding.viewer, 'cancel', binding.request.id).catch(() => {});
+  await api.storage.local.remove('binding');
+}
+async function handleMessage(msg, sender) {
   try {
-    // Only the extension popup may discover requests or create approval tabs.
+    // Only the extension popup may list requests or open a separate approval tab.
     const fromPopup = sender.url === api.runtime.getURL('popup.html');
-    if(message.type === 'pair' && fromPopup && AUTH_CONFIG.mobile){
-      if(!/^[a-f0-9]{64}$/.test(message.token||''))throw Error('Enter the 64-character device pairing key.');
-      const response=await fetch(AUTH_CONFIG.relay+'/pending',{headers:{Authorization:'Bearer '+message.token},signal:AbortSignal.timeout(10000)});
-      if(!response.ok)throw Error('Pairing failed. Check the key and your Tailscale connection.');
-      await api.storage.local.set({mobileToken:message.token});return {paired:true};
+    const viewer = sender.frameId === 0 && Number.isInteger(sender.tab?.id) ? viewerOrigin(sender.url) : null;
+    if (msg.type === 'list' && fromPopup) {
+      const {lastViewer} = await api.storage.local.get('lastViewer');
+      if (!lastViewer) return {requests: [], viewer: null};
+      return {requests: await pending(lastViewer), viewer: lastViewer};
     }
-    const viewerURL = sender.url && new URL(sender.url);
-    const fromViewer = sender.frameId === 0 && Number.isInteger(sender.tab?.id) &&
-      viewerURL.origin === 'https://procbox.agent-trace.ts.net:8443' && viewerURL.pathname === '/';
-    if (message.type === 'list' && fromPopup) return {requests: await relay('/pending')};
-    if ((message.type === 'open' && fromPopup) || (message.type === 'viewer-open' && fromViewer)) {
-      const matches = (await relay('/pending')).filter(r => fromPopup ? r.id === message.id :
-        r.id.slice(0,8).toUpperCase() === message.code && r.origin === message.origin);
+    if ((msg.type === 'open' && fromPopup) || (msg.type === 'viewer-open' && viewer)) {
+      const source = viewer || (await api.storage.local.get('lastViewer')).lastViewer;
+      if (!source) throw Error('Open a shared browser viewer first');
+      const matches = (await pending(source)).filter(r => fromPopup ? r.id === msg.id :
+        r.id.slice(0, 8).toUpperCase() === msg.code && r.origin === msg.origin);
       const request = matches.length === 1 && matches[0];
-      if (!request) throw Error('Request expired');
-      if (!(AUTH_CONFIG.sites || [AUTH_CONFIG.site]).includes(request.origin)) throw Error('This site is not enabled for the paired browser');
+      if (!request) throw Error('Request expired or not from one of your hosts');
       const prior = (await api.storage.local.get('binding')).binding;
       if (prior) {
-        await relay('/cancel', {id:prior.request.id}).catch(() => {});
-        await api.storage.local.remove('binding');
-        if(prior.returnURL)await returnToViewer(prior).catch(() => {});
+        await release(prior);
+        if (prior.returnURL) await returnToViewer(prior).catch(() => {});
         else await api.tabs.remove(prior.tabId).catch(() => {});
       }
-      // Create inactive first. Content-script readiness is retried until bound.
-      const tab = fromViewer ? sender.tab : await api.tabs.create({url: 'about:blank', active: false});
-      await api.storage.local.set({binding: {tabId: tab.id, request, returnURL:fromViewer?viewerURL.href:null, autoStart:fromViewer}});
-      await api.tabs.update(tab.id, {url: request.origin+(request.origin.startsWith('http://localhost:')?'/approval':'/'), active: true});
+      const tab = viewer ? sender.tab : await api.tabs.create({url: 'about:blank', active: false});
+      await api.storage.local.set({lastViewer: source, binding: {tabId: tab.id, viewer: source, request,
+        returnURL: viewer ? sender.url : null, autoStart: !!viewer}});
+      // The approval script is injected once this tab reaches the site's origin.
+      await api.tabs.update(tab.id, {url: request.origin + '/', active: true});
       return {opened: true};
     }
     const {binding} = await api.storage.local.get('binding');
     if (!sameTab(sender, binding)) return {error: 'No approval assigned to this tab'};
-    if (message.type === 'ready') {
-      const requests = await relay('/pending');
-      if (!requests.some(r => r.id === binding.request.id)) return {error: 'Request ended'};
-      return {request: binding.request, autoStart:binding.autoStart, returnsToViewer:!!binding.returnURL};
+    if (msg.type === 'ready') {
+      if (!(await pending(binding.viewer)).some(r => r.id === binding.request.id)) return {error: 'Request ended'};
+      return {request: binding.request, autoStart: binding.autoStart, returnsToViewer: !!binding.returnURL};
     }
-    if (message.id !== binding.request.id) throw Error('Request mismatch');
-    if (message.type === 'complete' || message.type === 'cancel') {
-      const result = await relay('/' + message.type, {id: message.id, response: message.response});
+    if (msg.id !== binding.request.id) throw Error('Request mismatch');
+    if (msg.type === 'complete' || msg.type === 'cancel') {
+      const result = await post(binding.viewer, msg.type, msg.id, msg.type === 'complete' ? {response: msg.response} : {});
       await api.storage.local.remove('binding');
       await returnToViewer(binding).catch(() => {});
       return result;
@@ -77,14 +108,17 @@ async function handleMessage(message, sender) {
 }
 // Chrome versions differ in Promise listener support; keep the response channel open.
 if (globalThis.browser) api.runtime.onMessage.addListener(handleMessage);
-else api.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  handleMessage(message, sender).then(sendResponse, error => sendResponse({error:error.message}));
+else api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  handleMessage(msg, sender).then(sendResponse, error => sendResponse({error: error.message}));
   return true;
+});
+api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
+  if (change.status !== 'complete') return;
+  const {binding} = await api.storage.local.get('binding');
+  if (binding?.tabId !== tabId || !tab.url || new URL(tab.url).origin !== binding.request.origin) return;
+  await api.scripting.executeScript({target: {tabId}, files: ['approval.js']}).catch(() => {});
 });
 api.tabs.onRemoved.addListener(async tabId => {
   const {binding} = await api.storage.local.get('binding');
-  if (binding?.tabId === tabId) {
-    await relay('/cancel', {id: binding.request.id}).catch(() => {});
-    await api.storage.local.remove('binding');
-  }
+  if (binding?.tabId === tabId) await release(binding);
 });

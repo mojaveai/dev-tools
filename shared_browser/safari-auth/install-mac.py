@@ -1,69 +1,73 @@
-"""Install the explicitly enabled Mac companion and its loopback-only SSH tunnel."""
+"""Build this Mac's passkey approval extensions and retire the old Mac relay.
+
+Each dev-tools host now runs its own relay inside the shared browser, reached
+through its Tailscale viewer, so the Mac needs only the Chrome and Safari
+extensions. They share the fleet key that the deployment gives every host.
+"""
+import importlib.util
 import os
-import argparse
 from pathlib import Path
 import plistlib
-import json
+import re
 import secrets
-import shutil
 import subprocess
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--site', choices=['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com'], action='append', help='Repeat to enable specific approved sites; defaults to both sites')
-args = parser.parse_args()
-sites = args.site or ['https://cryptoagent-1-1.agent-trace.ts.net:3581', 'https://demo.yubico.com']
-source = Path(__file__).resolve().parent
-runtime = Path.home() / '.local/share/dev-tools-safari-auth'
-runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
-os.chmod(runtime, 0o700)
-for item in source.iterdir():
-    if item.name in ('local', '.gitignore'):
-        continue
-    target = runtime / item.name
-    if item.is_dir():
-        shutil.copytree(item, target, dirs_exist_ok=True)
-    else:
-        shutil.copy2(item, target)
-local = runtime / 'local'
-(local / 'extension').mkdir(parents=True, exist_ok=True, mode=0o700)
-os.chmod(local, 0o700)
-pairing = local / 'extension/config.js'
-if not pairing.exists():
-    previous = source / 'local/extension/config.js'
-    if previous.exists():
-        shutil.copy2(previous, pairing)
-    else:
-        pairing.write_text('const AUTH_CONFIG = ' + json.dumps({'token': secrets.token_hex(32)}) + ';\n')
-    os.chmod(pairing, 0o600)
-host_token = local / 'host-token'
-if not host_token.exists() and (source / 'local/host-token').exists():
-    shutil.copy2(source / 'local/host-token', host_token)
-    os.chmod(host_token, 0o600)
-node = shutil.which('node')
-if not node:
-    raise SystemExit('Node.js is required')
-env = {'AUTH_SITES': ','.join(sites)}
-subprocess.run([node, str(runtime / 'yubico.mjs')], env={**os.environ, **env, 'AUTH_SETUP_ONLY': '1'}, check=True)
-agents = Path.home() / 'Library/LaunchAgents'
-agents.mkdir(parents=True, exist_ok=True)
-jobs = {
-    'com.dev-tools.auth-companion': [node, str(runtime / 'yubico.mjs')],
-    'com.dev-tools.auth-tunnel': ['/usr/bin/ssh', '-NT', '-o', 'BatchMode=yes',
-        '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=20',
-        '-o', 'ServerAliveCountMax=3',
-        '-R', '127.0.0.1:8811:127.0.0.1:8811',
-        '-L', '127.0.0.1:3581:cryptoagent-1-1.agent-trace.ts.net:3581', 'procbox'],
-}
-domain = f'gui/{os.getuid()}'
-for label, args in jobs.items():
-    config = {'Label': label, 'ProgramArguments': args, 'RunAtLoad': True,
-              'KeepAlive': True, 'ThrottleInterval': 10,
-              'WorkingDirectory': str(runtime), 'EnvironmentVariables': env,
-              'StandardOutPath': str(local / (label + '.log')),
-              'StandardErrorPath': str(local / (label + '.error.log'))}
-    target = agents / (label + '.plist')
-    target.write_bytes(plistlib.dumps(config))
-    subprocess.run(['launchctl', 'bootout', domain + '/' + label], capture_output=True)
+SOURCE = Path(__file__).resolve().parent
+KEY = Path(os.environ.get('DEVTOOLS_AUTH_FLEET_KEY', Path.home()/'.config/dev-tools/auth-fleet.key'))
+CHROME = Path.home()/'.local/share/dev-tools-chrome-auth/extension'
+SAFARI = Path.home()/'.local/share/dev-tools-safari-auth/local/extension'
+AGENTS = Path.home()/'Library/LaunchAgents'
+DASHBOARD = 'cryptoagent-1-1.agent-trace.ts.net'
+
+
+def fleet_key():
+    # The controller Mac owns the key; the deployment copies it to every host.
+    if not KEY.exists():
+        KEY.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(KEY, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(secrets.token_hex(32)+'\n')
+    value = KEY.read_text().strip()
+    if not re.fullmatch(r'[a-f0-9]{64}', value):
+        raise SystemExit(f'Invalid fleet key at {KEY}')
+    return value
+
+
+def launch_agent(label, program=None):
+    domain = f'gui/{os.getuid()}'
+    target = AGENTS/(label+'.plist')
+    subprocess.run(['launchctl', 'bootout', domain+'/'+label], capture_output=True)
+    if program is None:
+        target.unlink(missing_ok=True)
+        return
+    log = SAFARI.parent/(label+'.log')
+    target.write_bytes(plistlib.dumps({'Label': label, 'ProgramArguments': program, 'RunAtLoad': True,
+                                       'KeepAlive': True, 'ThrottleInterval': 10,
+                                       'StandardOutPath': str(log), 'StandardErrorPath': str(log)}))
     subprocess.run(['launchctl', 'bootstrap', domain, str(target)], check=True)
-print('Companion installed. Safari extension folder:', local / 'extension')
-print('Required local hostname entry: 127.0.0.1 cryptoagent-1-1.agent-trace.ts.net')
+
+
+def main():
+    spec = importlib.util.spec_from_file_location('build_extensions', SOURCE/'build-extensions.py')
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    key = fleet_key()
+    builder.build(SOURCE, key, CHROME, 'chrome')
+    builder.build(SOURCE, key, SAFARI, 'safari')
+    # Hosts no longer reach a relay on this Mac.
+    launch_agent('com.dev-tools.auth-companion')
+    # The cryptoagent dashboard is reachable from this Mac only through procbox;
+    # keep that forward while /etc/hosts points the dashboard at loopback.
+    hosts = Path('/etc/hosts').read_text(errors='replace')
+    if re.search(r'^\s*127\.0\.0\.1\s+'+re.escape(DASHBOARD)+r'\b', hosts, re.M):
+        launch_agent('com.dev-tools.auth-tunnel', ['/usr/bin/ssh', '-NT', '-o', 'BatchMode=yes',
+                     '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=20', '-o', 'ServerAliveCountMax=3',
+                     '-L', f'127.0.0.1:3581:{DASHBOARD}:3581', 'procbox'])
+    else:
+        launch_agent('com.dev-tools.auth-tunnel')
+    print('Chrome extension:', CHROME)
+    print('Safari extension:', SAFARI)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,5 +1,10 @@
 # iPhone Safari extension development
 
+> **Superseded (2026-09-28):** passkey approval now runs per host on every shared
+> browser with Mac Chrome/Safari extensions and no Mac relay or tunnels. See
+> [docs/shared-browser-passkeys.md](../../docs/shared-browser-passkeys.md). The notes
+> below are the historical prototype record; the scripts they name were removed.
+
 The extension runs in iPhone Safari. Apple requires an iOS containing app to install
 it; the containing app is not a replacement browser. Reuse the same-tab approval
 flow from the Mac extension. The generated iOS archive contains no pairing keys.

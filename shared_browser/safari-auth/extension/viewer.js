@@ -1,6 +1,8 @@
-// The page never receives the pairing capability, challenge, or credential response.
+// The page never receives the fleet key, challenge, or credential response.
+// Any shared viewer may ask; the background accepts only fleet-signed requests.
 (() => {
-  if (window.top !== window || location.origin !== 'https://procbox.agent-trace.ts.net:8443' || location.pathname !== '/') return;
+  if (window.top !== window || location.protocol !== 'https:' || location.port !== '8443' ||
+    !location.hostname.endsWith('.ts.net') || location.pathname !== '/') return;
   function connect() {
     for (const button of document.querySelectorAll('button[data-devtools-auth-code]')) {
       if (button.dataset.authConnected) continue;

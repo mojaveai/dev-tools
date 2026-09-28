@@ -12,10 +12,10 @@ async function refresh() {
     if(!result)throw Error('The extension is starting. Try Refresh.');
     if (result.error) throw Error(result.error);
     list.replaceChildren();
-    if (!result.requests.length) list.textContent = 'No pending approvals.';
+    if (!result.requests.length) list.textContent = result.viewer ? 'No pending approvals on '+new URL(result.viewer).hostname.split('.')[0]+'.' : 'Open a shared browser viewer to approve its requests.';
     for (const request of result.requests) {
       const button = document.createElement('button');
-      button.textContent = `${request.kind === 'create' ? 'Create test passkey' : 'Sign in'} · ${request.origin} · ${request.id.slice(0,8)}`;
+      button.textContent = `${request.kind === 'create' ? 'Create passkey' : 'Sign in'} · ${request.origin} · ${request.id.slice(0,8)}`;
       button.onclick = async () => {
         button.disabled = true;
         const r = await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'open',id:request.id});
@@ -28,13 +28,3 @@ async function refresh() {
 }
 document.querySelector('#refresh').onclick = refresh;
 refresh();
-if(AUTH_CONFIG.mobile){
-  document.querySelector('#pairing').hidden=false;
-  document.querySelector('#pair').onclick=async()=>{
-    const field=document.querySelector('#pair-token');
-    const token=field.value.trim();field.value='';
-    const result=await (globalThis.browser || globalThis.chrome).runtime.sendMessage({type:'pair',token}).catch(error=>({error:error.message}));
-    document.querySelector('#pair-status').textContent=result?.paired?'Paired. You can approve from the viewer.':result?.error||'Pairing failed';
-    if(result?.paired)await refresh();
-  };
-}

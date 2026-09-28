@@ -3,6 +3,8 @@ import { installCanvasSnapshots } from './canvas-snapshots.js';
 import { installLayoutMetrics } from './layout-metrics.js';
 import http from "node:http";
 import {authCompanionProxy} from './auth-companion-proxy.mjs';
+import {startAuthHost} from './auth-host.mjs';
+import {browserDataDir} from './browser-host.mjs';
 import {TabIdle} from "./tab-idle.mjs";
 import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
 import { compactImages } from "./compact-images.mjs";
@@ -478,6 +480,9 @@ browser.on("targetcreated", async (target) => {
   }
 });
 for (const page of await browser.pages()) await attach(page);
+// Passkey approval must never take the shared browser down with it.
+startAuthHost({browser,viewer:publicOrigin,dataDir:browserDataDir(settings.chrome||'/usr/bin/google-chrome',settings.stateDir)})
+  .catch(error=>console.error('Passkey approval unavailable: '+error.message));
 // Reconnecting a receiver must follow Chrome's current page, not the first
 // tab returned by CDP. Otherwise the viewer silently jumps to an older tab.
 async function foregroundTab() {

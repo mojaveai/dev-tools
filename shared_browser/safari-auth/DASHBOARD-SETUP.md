@@ -1,5 +1,10 @@
 # Opt-in Mac companion for the cryptoagent dashboard
 
+> **Superseded (2026-09-28):** passkey approval now runs per host on every shared
+> browser with Mac Chrome/Safari extensions and no Mac relay or tunnels. See
+> [docs/shared-browser-passkeys.md](../../docs/shared-browser-passkeys.md). The notes
+> below are the historical prototype record; the scripts they name were removed.
+
 Target: `https://cryptoagent-1-1.agent-trace.ts.net:3581/`, viewed through the
 regular procbox shared browser. This uses the extension path and does not install
 anything on cryptoagent or change its credential verification or authentication

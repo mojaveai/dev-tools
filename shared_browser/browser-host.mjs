@@ -42,6 +42,13 @@ export async function purgeClearanceCookies(profile) {
   return removed;
 }
 
+// Strictly confined Snap Chromium may read its own common data directory,
+// but cannot read the hidden dev-tools state directory in HOME. The profile
+// and anything Chrome must load (such as unpacked extensions) live here.
+export function browserDataDir(executable,state,home=process.env.HOME) {
+  return executable.startsWith('/snap/bin/chromium')?path.join(home,'snap/chromium/common/dev-tools-shared-browser'):state;
+}
+
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function freePort() {
   const s=net.createServer();await new Promise((resolve,reject)=>{s.once('error',reject);s.listen(0,'127.0.0.1',resolve);});
@@ -77,10 +84,7 @@ export async function runBrowserHost() {
   const state=settings.stateDir;
   const executable=settings.chrome||'/usr/bin/google-chrome';
   await fs.mkdir(state,{recursive:true,mode:0o700});
-  // Strictly confined Snap Chromium may read its own common data directory,
-  // but cannot read the hidden dev-tools state directory in HOME.
-  const snap=executable.startsWith('/snap/bin/chromium');
-  const browserData=snap?path.join(process.env.HOME,'snap/chromium/common/dev-tools-shared-browser'):state;
+  const browserData=browserDataDir(executable,state);
   await fs.mkdir(browserData,{recursive:true,mode:0o700});
   // OS advisory locking is supplied by the systemd unit's flock. The endpoint
   // file is published only after the owned Chrome process announces readiness.

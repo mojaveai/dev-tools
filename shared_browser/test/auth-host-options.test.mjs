@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {localOptions} from '../host-options.mjs';
+import {localOptions} from '../auth-host-options.mjs';
 const origin='https://demo.yubico.com';
 const options={challenge:'a',rpId:'demo.yubico.com',extensions:{credProps:true,remoteDesktopClientOverride:{origin,sameOriginWithAncestors:true}}};
 test('uses Chrome trusted origin and removes only the host override',()=>{const result=localOptions('get',options,origin);assert.deepEqual(result,{challenge:'a',rpId:'demo.yubico.com',extensions:{credProps:true}});assert.ok(options.extensions.remoteDesktopClientOverride);});

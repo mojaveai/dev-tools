@@ -142,6 +142,64 @@
       loop_control:
         loop_var: skill_target
 
+    # Passkey approval: every host's shared browser signs its requests with this
+    # key, and the Mac's approval extensions accept only signed requests.
+    - name: Ensure the controller's passkey fleet key
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - |
+            import os, secrets, sys
+            path = sys.argv[1]
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                print('present')
+            else:
+                with os.fdopen(fd, 'w') as handle:
+                    handle.write(secrets.token_hex(32) + '\n')
+                print('created')
+          - "{{ lookup('env', 'HOME') }}/.config/dev-tools/auth-fleet.key"
+      delegate_to: localhost
+      run_once: true
+      register: fleet_key_result
+      changed_when: "'created' in fleet_key_result.stdout"
+      when: not ansible_check_mode
+
+    - name: Read the passkey fleet key
+      ansible.builtin.slurp:
+        src: "{{ lookup('env', 'HOME') }}/.config/dev-tools/auth-fleet.key"
+      delegate_to: localhost
+      run_once: true
+      register: fleet_key
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Create private dev-tools configuration directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts.user_dir }}/.config/dev-tools"
+        state: directory
+        mode: '0700'
+
+    - name: Share the passkey fleet key with this host
+      ansible.builtin.copy:
+        content: "{{ fleet_key.content | b64decode }}"
+        dest: "{{ ansible_facts.user_dir }}/.config/dev-tools/auth-fleet.key"
+        mode: '0600'
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Build the Mac passkey approval extensions
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - "{{ devtools_release }}/shared_browser/safari-auth/install-mac.py"
+      register: mac_auth_result
+      changed_when: true
+      when: ansible_facts.system == 'Darwin' and not ansible_check_mode
+
     - name: Inspect conventional tmux configuration
       ansible.builtin.stat:
         path: "{{ ansible_facts.user_dir }}/.tmux.conf"
