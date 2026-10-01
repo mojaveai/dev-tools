@@ -49,11 +49,18 @@ async function pending(viewer) {
 // autofill on load), which makes ours fail with "A request is already pending".
 // Approve from a script-free document on the same origin when one exists.
 async function approvalURL(origin) {
-  for (const path of ['/robots.txt', '/favicon.ico', '/.well-known/dev-tools-auth']) {
+  for (const path of ['/robots.txt', '/.well-known/dev-tools-auth']) {
     try {
       const response = await fetch(origin + path, {credentials: 'omit', redirect: 'manual', signal: AbortSignal.timeout(5000)});
-      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) continue;
-      if (!/html/i.test(response.headers.get('content-type') || '') || !/<script/i.test(await response.text()))
+      // Empty HTTP errors can become chrome-error:// documents, where extension
+      // injection and WebAuthn are unavailable. Downloads, images, and no-content
+      // responses also cannot be relied on to create an approval document.
+      if (!response.ok || response.status === 204 || response.status === 205 ||
+          response.type === 'opaqueredirect' ||
+          /attachment/i.test(response.headers.get('content-disposition') || '')) continue;
+      const type = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (type === 'text/plain' ||
+          (['text/html', 'application/xhtml+xml'].includes(type) && !/<script\b/i.test(await response.text())))
         return origin + path;
     } catch {}
   }
@@ -81,6 +88,8 @@ async function handleMessage(msg, sender) {
     const viewer = sender.frameId === 0 && Number.isInteger(sender.tab?.id) ? viewerOrigin(sender.url) : null;
     if (msg.type === 'list' && fromPopup) {
       const {lastViewer} = await api.storage.local.get('lastViewer');
+      const {approvalError} = await api.storage.local.get('approvalError');
+      if (approvalError) return {error: approvalError};
       if (!lastViewer) return {requests: [], viewer: null};
       return {requests: await pending(lastViewer), viewer: lastViewer};
     }
@@ -98,6 +107,7 @@ async function handleMessage(msg, sender) {
         else await api.tabs.remove(prior.tabId).catch(() => {});
       }
       const tab = viewer ? sender.tab : await api.tabs.create({url: 'about:blank', active: false});
+      await api.storage.local.remove('approvalError');
       await api.storage.local.set({lastViewer: source, binding: {tabId: tab.id, viewer: source, request,
         returnURL: viewer ? sender.url : null, autoStart: !!viewer}});
       // The approval script is injected once this tab reaches the site's origin.
@@ -130,7 +140,24 @@ api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
   if (change.status !== 'complete') return;
   const {binding} = await api.storage.local.get('binding');
   if (binding?.tabId !== tabId || !tab.url || new URL(tab.url).origin !== binding.request.origin) return;
-  await api.scripting.executeScript({target: {tabId}, files: ['approval.js']}).catch(() => {});
+  try {
+    await api.scripting.executeScript({target: {tabId}, files: ['approval.js']});
+  } catch (error) {
+    // A probe can differ from a real navigation (cookies, content negotiation,
+    // or a race with the server). Retry the site's document once, never a
+    // credential submission, instead of leaving the user on an error page.
+    const current = (await api.storage.local.get('binding')).binding;
+    if (current?.request.id !== binding.request.id || current.tabId !== tabId) return;
+    if (!binding.documentFallback && tab.url !== binding.request.origin + '/') {
+      await api.storage.local.set({binding: {...binding, documentFallback: true}});
+      await api.tabs.update(tabId, {url: binding.request.origin + '/', active: true});
+      return;
+    }
+    await api.storage.local.set({approvalError: 'Could not open passkey approval at ' +
+      binding.request.origin + ': ' + error.message});
+    await release(binding);
+    await returnToViewer(binding).catch(() => {});
+  }
 });
 api.tabs.onRemoved.addListener(async tabId => {
   const {binding} = await api.storage.local.get('binding');

@@ -49,4 +49,14 @@ credential lives. The approving Mac must be able to load the site itself.
 
 The approval page must stay on the requesting origin; sites whose root redirects
 to a different origin need the approval started again from that origin. Agent
-Trace's QA dashboard on procbox keeps its own separate approval link.
+Trace uses the same extension flow as other HTTPS sites. The older QA and
+canonical portal passkey bridge services should be disabled; they override the
+site's WebAuthn call before Chrome can send it through the general host extension.
+
+The extension first tries a successful, script-free document at the site's
+origin, then falls back to its root document. HTTP errors, redirects, downloads,
+binary files, and no-content responses are not usable approval documents.
+If injection fails after navigation, it retries the root once and reports any
+remaining failure in the extension popup. A local PIN or touch prompt confirms
+that handoff reached the authenticator; successful sign-in still requires a
+credential registered with the requesting site and its server's verification.

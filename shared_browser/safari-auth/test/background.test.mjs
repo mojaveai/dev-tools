@@ -10,19 +10,19 @@ const mac=(k,...parts)=>createHmac('sha256',Buffer.from(k,'hex')).update(['dev-t
 function signed(request,{signer=key,viewer=viewerOrigin}={}){
   const payload=JSON.stringify({viewer,...request});return {payload,sig:mac(signer,'request',payload)};
 }
-async function setup({chrome=false,items,site={}}={}){
+async function setup({chrome=false,items,site={},injectError}={}){
   let listener,updated,state={},calls=[],tabCalls=[],injected=[];
   const request={id:'abcdef0123456789',origin:'https://auth.nebius.com',kind:'get',publicKey:{challenge:'challenge'},expiresAt:Date.now()+120000};
   const pending=items||[signed(request)];
   const browser={runtime:{getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}},
     storage:{local:{get:async k=>k?{[k]:state[k]}:state,set:async value=>Object.assign(state,value),remove:async k=>delete state[k]}},
-    scripting:{executeScript:async options=>injected.push(options)},
+    scripting:{executeScript:async options=>{injected.push(options);if(injectError)throw Error(injectError);}},
     tabs:{create:async()=>{tabCalls.push(['create']);return {id:42};},get:async id=>({id,url:state.tabURL||request.origin}),
       update:async(...args)=>{tabCalls.push(['update',...args]);if(args[1].url)state.tabURL=args[1].url;},
       remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}},onUpdated:{addListener:fn=>updated=fn}}};
   vm.runInNewContext(source,{...(chrome?{chrome:browser}:{browser}),URL,AbortSignal,TextEncoder,crypto:webcrypto,Uint8Array,
     AUTH_CONFIG:{fleetKey:key},
-    fetch:async(url,options)=>{calls.push({url,options});if(!url.includes('/auth-companion/')){const page=site[new URL(url).pathname]||{type:'text/html',body:'<script>app()</script>'};return {type:'basic',status:page.status||200,headers:{get:()=>page.type},text:async()=>page.body};}return {ok:true,json:async()=>url.endsWith('/pending')?pending:{delivered:true}};}});
+    fetch:async(url,options)=>{calls.push({url,options});if(!url.includes('/auth-companion/')){const page=site[new URL(url).pathname]||{type:'text/html',body:'<script>app()</script>'};const status=page.status||200;return {ok:status>=200&&status<300,type:page.responseType||'basic',status,headers:{get:name=>name==='content-type'?page.type:page.disposition},text:async()=>page.body};}return {ok:true,json:async()=>url.endsWith('/pending')?pending:{delivered:true}};}});
   const send=(message,sender)=>chrome?new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);}):listener(message,sender);
   return {send,calls,request,tabCalls,injected,updated:(...a)=>updated(...a),state};
 }
@@ -99,15 +99,42 @@ test('popup lists the last viewer and Chrome callback messaging works',async()=>
   assert.ok((await app.send({type:'list'},approval(app))).error);
 });
 
-test('approval avoids pages that run site scripts and cross-origin redirects',async()=>{
+test('approval selects successful injectable documents and avoids scripts, errors, redirects, and downloads',async()=>{
   for(const [site,expected] of [
     [{'/robots.txt':{type:'text/plain',body:'User-agent: *'}},'/robots.txt'],
-    [{'/robots.txt':{status:404,type:'text/html',body:'<h1>Not found</h1>'}},'/robots.txt'],
-    [{'/robots.txt':{status:302,type:'text/html',body:''},'/favicon.ico':{type:'image/x-icon',body:''}},'/favicon.ico'],
+    [{'/robots.txt':{status:404,type:'text/html',body:'<h1>Not found</h1>'}},'/'],
+    [{'/robots.txt':{status:404,body:''}},'/'],
+    [{'/robots.txt':{status:403,type:'text/plain',body:'Forbidden'}},'/'],
+    [{'/robots.txt':{status:500,type:'text/plain',body:'Error'}},'/'],
+    [{'/robots.txt':{status:204,type:'text/plain',body:''}},'/'],
+    [{'/robots.txt':{status:205,type:'text/plain',body:''}},'/'],
+    [{'/robots.txt':{type:'text/plain',body:'User-agent: *',disposition:'attachment'}},'/'],
+    [{'/robots.txt':{type:'image/x-icon',body:'binary'}},'/'],
+    [{'/robots.txt':{type:'text/html',body:'<script src="/app.js"></script>'}},'/'],
+    [{'/robots.txt':{status:302,type:'text/html',body:''},'/.well-known/dev-tools-auth':{type:'text/plain',body:'Approval'}},'/.well-known/dev-tools-auth'],
+    [{'/robots.txt':{responseType:'opaqueredirect',type:'text/plain',body:''}},'/'],
+    [{'/robots.txt':{type:'text/html; charset=utf-8',body:'<!doctype html><p>Static page</p>'}},'/robots.txt'],
     [{},'/']]){
     const app=await setup({site});
     assert.equal((await app.send(open(app),viewer)).opened,true);
     assert.equal(app.tabCalls.at(-1)[2].url,app.request.origin+expected);
     assert.ok(app.calls.filter(c=>!c.url.includes('/auth-companion/')).every(c=>c.options.credentials==='omit'&&c.options.redirect==='manual'));
   }
+});
+
+test('failed injection retries the site document once and surfaces failure instead of silently stranding approval',async()=>{
+  const app=await setup({site:{'/robots.txt':{type:'text/plain',body:'User-agent: *'}},injectError:'Cannot access a chrome-error:// URL'});
+  await app.send(open(app),viewer);
+  await app.updated(7,{status:'complete'},{url:app.request.origin+'/robots.txt'});
+  assert.equal(app.tabCalls.at(-1)[2].url,app.request.origin+'/');
+  assert.equal(app.state.binding.documentFallback,true);
+  assert.equal(posts(app,'/cancel').length,0);
+  await app.updated(7,{status:'complete'},{url:app.request.origin+'/'});
+  assert.equal(app.state.binding,undefined);
+  assert.equal(posts(app,'/cancel').length,1);
+  assert.equal(app.tabCalls.at(-1)[2].url,viewerURL);
+  const popup=await app.send({type:'list'},{url:'chrome-extension://test/popup.html'});
+  assert.match(popup.error,/Could not open passkey approval.*chrome-error/);
+  assert.equal((await app.send(open(app),viewer)).opened,true);
+  assert.equal(app.state.approvalError,undefined);
 });

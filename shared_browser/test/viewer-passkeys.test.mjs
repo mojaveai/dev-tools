@@ -24,4 +24,10 @@ test('viewer offers extension approvals for any HTTPS site and clears expired re
  }
  viewer.update([{...request,expiresAt:1}]);assert.equal(viewer.panel.children.length,0);
  viewer.update([]);assert.equal(viewer.panel.children.length,0);
+ // Agent Trace must use the same signed extension approval as other sites.
+ // Historical portal URLs must not produce a second approval path.
+ for(const port of [23581,3581]){
+  viewer.update([{url:`https://procbox.agent-trace.ts.net:${port}/_shared-browser-passkey/?request=old`,code:'OLD',expiresAt:Date.now()+120000}]);
+  assert.equal(viewer.panel.children.length,0);
+ }
 });
