@@ -27,6 +27,18 @@ case "$1" in
         printf '%s\\n' "$PROTON_PASS_SESSION_DIR" >> "$TEST_LOG"
         ;;
     logout) rm -f "$PROTON_PASS_SESSION_DIR/database" ;;
+    pat)
+        case "$2" in
+            create) printf '%s\\n' '{"token":"pst_synthetic::testkey","pat_id":"synthetic-test-id"}' ;;
+            access)
+                [ "$3" = grant ] || exit 98
+                # Reject the previous viewer policy; no live credentials used.
+                case " $* " in *" --role editor "*) ;; *) exit 97 ;; esac
+                printf '%s\\n' "$*" >> "$TEST_LOG"
+                ;;
+            *) exit 96 ;;
+        esac
+        ;;
     *) exit 99 ;;
 esac
 """)
@@ -68,6 +80,16 @@ printf 'pass-cli info\\n' | pass_session_run || exit 2
 """)
         self.assertEqual(len(paths), 2)
         self.assertEqual(len(set(paths)), 2)
+
+    def test_minted_token_has_editor_access_only_to_configured_vaults(self):
+        grants = self.run_case("""
+PAT_VAULTS='codex infra'
+pass_mint_scoped_token || exit 1
+[ "$note_granted" = 2 ] || exit 2
+""")
+        self.assertEqual(len(grants), 2)
+        self.assertIn('--vault-name codex --role editor', grants[0])
+        self.assertIn('--vault-name infra --role editor', grants[1])
 
     def test_human_to_pat_transition_and_token_persistence(self):
         paths = self.run_case("""

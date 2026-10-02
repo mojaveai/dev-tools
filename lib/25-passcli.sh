@@ -8,7 +8,7 @@
 #
 #   pass-cli login                 human approves a link      (full vault)
 #   pass-cli pat create            mint dev-<host>, expiring
-#   pass-cli pat access grant      scope it to named vaults, viewer
+#   pass-cli pat access grant      scope it to named vaults, editor
 #   pass-cli logout                full session destroyed
 #   pass-cli login --pat           re-auth, scoped             (persists)
 #
@@ -23,7 +23,7 @@ PAT_ID_FILE="$STATE_DIR/proton-pass.pat.id"
 PROTON_PASS_SESSION_DIR="${PROTON_PASS_SESSION_DIR:-$STATE_DIR/proton-pass-session}"
 export PROTON_PASS_SESSION_DIR
 
-# Vaults the scoped token may read. Space-separated.
+# Vaults the scoped token may read and edit. Space-separated.
 PAT_VAULTS="${DEVTOOLS_PAT_VAULTS:-codex}"
 PAT_EXPIRATION="${DEVTOOLS_PAT_EXPIRATION:-3m}"
 PAT_NAME="${DEVTOOLS_PAT_NAME:-dev-$(hostname 2>/dev/null | cut -d. -f1)}"
@@ -214,7 +214,7 @@ print(tok); print(pid)
     for _v in $PAT_VAULTS; do
         if PROTON_PASS_KEY_PROVIDER=fs pass-cli pat access grant \
             --personal-access-token-name "$PAT_NAME" \
-            --vault-name "$_v" --role viewer >/dev/null 2>&1
+            --vault-name "$_v" --role editor >/dev/null 2>&1
         then
             _granted=$((_granted + 1))
         else

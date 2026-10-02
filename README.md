@@ -128,7 +128,7 @@ Two approvals, both from a browser you are already signed into. Nothing is typed
 and nothing is stored on the phone.
 
 **The full-vault session lasts seconds.** It exists only to mint a scoped token,
-then it is explicitly logged out. What remains on the machine is a viewer-role
+then it is explicitly logged out. What remains on the machine is an editor-role
 token limited to the vaults you name, expiring in three months, named after the
 host — so `pass-cli pat list` shows which machine each token belongs to, and
 revoking one box touches no other.
@@ -143,13 +143,19 @@ Proton's.
 ### Tuning the scope
 
 ```sh
-DEVTOOLS_PAT_VAULTS="codex infra" # vaults the token may read (default: codex)
+DEVTOOLS_PAT_VAULTS="codex infra" # vaults the token may read and edit (default: codex)
 DEVTOOLS_PAT_EXPIRATION=1m        # 1d 1w 1m 3m 6m 1y   (default: 3m)
 DEVTOOLS_PAT_NAME=laptop          # default: dev-<hostname>
 ```
 
-Grants are `viewer`. If none succeed the run fails rather than dropping to a
+Grants are `editor`. If none succeed the run fails rather than dropping to a
 token that cannot read anything.
+
+Existing tokens keep their grants when bootstrap runs again. Upgrade each deployed
+token's existing vault grants from a full user session with `pass-cli pat access
+grant --personal-access-token-id ID --vault-name VAULT --role editor`; verify with
+`pass-cli pat access list-access --personal-access-token-id ID --output json`.
+This changes access in place without replacing the host's token or expiration.
 
 ## Re-running it
 
