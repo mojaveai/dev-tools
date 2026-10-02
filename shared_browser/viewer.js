@@ -32,6 +32,30 @@ const agentTabs = new ViewerAgents(tab=>send({type:"tab",tab}));
 let mouseRelay,mouseSupported=false;
 const transfers = new ViewerTransfers({context:()=>({tab:active,generation,client:clientId,connected}),send:message=>send(message),error:message=>error(message)});
 const passkeys = new ViewerPasskeys();
+const passwordShortcut=document.createElement('section');
+passwordShortcut.style.cssText='padding:10px;background:#fffffff5;border:1px solid #d8e0e8;border-radius:12px;box-shadow:0 4px 20px #14283c20';
+passwordShortcut.hidden=true;
+const passwordShortcutButton=document.createElement('button');
+passwordShortcutButton.textContent='Fill saved password';
+passwordShortcut.append(passwordShortcutButton);
+document.getElementById('viewer-requests').append(passwordShortcut);
+async function startPasswordFill(event) {
+  if (!event.isTrusted || !connected) return;
+  if (document.getElementById('fill-password').dataset.authPasswordConnected !== 'true') {
+    error('Enable or reload Dev Tools Auth in Chrome, then reload this viewer.');return;
+  }
+  try {
+    const response=await fetch('/password-request',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tab:active,generation}),redirect:'error'});
+    const result=await response.json();
+    if (!response.ok) throw Error(result.error || 'Could not open saved-password filling');
+    const button=document.getElementById('fill-password');
+    button.dataset.passwordCode=result.code;button.dataset.passwordOrigin=result.origin;
+    document.dispatchEvent(new CustomEvent('devtools-password-request'));
+  } catch(e) {error(e.message);}
+}
+document.getElementById('fill-password').addEventListener('click',startPasswordFill);
+passwordShortcutButton.addEventListener('click',startPasswordFill);
 const caches = new Map();
 const opaqueCache = new Map();
 let replayHistory = {};
@@ -260,6 +284,7 @@ function wireFrame() {
     plans.push({source,...visible});
   }
   } finally {occlusion.dispose();}
+  passwordShortcut.hidden=!connected || !plans.some(({source})=>source.type==='password' && source.autocomplete!=='new-password');
   // Finish all replay geometry reads before any DOM/style writes. Alternating
   // them forces a new layout for each link or form field on the page.
   for(const {source,original} of restore){source.style.setProperty('opacity',original.value,original.priority);sourceOpacity.delete(source);}

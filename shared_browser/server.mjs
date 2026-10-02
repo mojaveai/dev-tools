@@ -3,7 +3,8 @@ import { installCanvasSnapshots } from './canvas-snapshots.js';
 import { installLayoutMetrics } from './layout-metrics.js';
 import http from "node:http";
 import {authCompanionProxy} from './auth-companion-proxy.mjs';
-import {startAuthHost} from './auth-host.mjs';
+import {startAuthHost,readFleetKey} from './auth-host.mjs';
+import {PasswordFill} from './password-fill.mjs';
 import {browserDataDir} from './browser-host.mjs';
 import {TabIdle} from "./tab-idle.mjs";
 import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
@@ -527,6 +528,8 @@ async function body(req, max = 200000) {
   return JSON.parse(Buffer.concat(parts).toString() || "{}");
 }
 const authorized = (req) => req.headers["tailscale-user-login"] === owner;
+const passwordFill = new PasswordFill({key:await readFleetKey(),viewer:publicOrigin,
+  getTab:id=>session.tabs.get(id),active:()=>session.active,serial});
 const httpServer = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://local");
@@ -547,6 +550,20 @@ const httpServer = http.createServer(async (req, res) => {
         },
         403,
       );
+    if (url.pathname === '/auth-companion/password-pending' && req.method === 'GET')
+      return json(res,passwordFill.pending());
+    if ((url.pathname === '/password-request' || /^\/auth-companion\/password-(complete|cancel)$/.test(url.pathname)) && req.method === 'POST') {
+      if (url.pathname === '/password-request' && req.headers.origin !== publicOrigin)
+        return json(res,{error:'Invalid password request origin'},403);
+      let size=0;const chunks=[];
+      for await (const chunk of req) {size+=chunk.length;if(size>20000)return json(res,{error:'Request too large'},413);chunks.push(chunk);}
+      try {
+        const body=JSON.parse(Buffer.concat(chunks).toString() || '{}');
+        return json(res,url.pathname === '/password-request'
+          ? await serial(()=>passwordFill.start(body))
+          : await passwordFill.finish(url.pathname.endsWith('complete')?'complete':'cancel',body));
+      } catch(error) {return json(res,{error:error.message},409);}
+    }
     if (url.pathname.startsWith('/auth-companion/')) return authCompanionProxy(req,res);
     if (url.pathname === '/upload' && req.method === 'POST') {
       if (req.headers.origin !== publicOrigin) return json(res, {error:'Invalid upload origin'}, 403);

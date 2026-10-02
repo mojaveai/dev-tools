@@ -18,7 +18,7 @@ class AuthExtensionBuildTests(unittest.TestCase):
                 manifest=json.loads((output/'manifest.json').read_text())
                 self.assertEqual((output/'config.js').stat().st_mode & 0o777,0o600)
                 self.assertIn('"fleetKey": "'+'a'*64+'"',(output/'config.js').read_text())
-                for script in ['config.js','background.js','approval.js','viewer.js','popup.js','popup.html']:
+                for script in ['config.js','background.js','approval.js','password.js','viewer.js','popup.js','popup.html']:
                     self.assertTrue((output/script).is_file())
                 self.assertNotIn('webAuthenticationProxy',manifest['permissions'])
                 self.assertEqual(manifest['host_permissions'],['https://*/*'])

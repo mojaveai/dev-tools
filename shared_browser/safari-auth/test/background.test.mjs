@@ -22,7 +22,7 @@ async function setup({chrome=false,items,site={},injectError}={}){
       remove:async(...args)=>{tabCalls.push(['remove',...args]);},onRemoved:{addListener:()=>{}},onUpdated:{addListener:fn=>updated=fn}}};
   vm.runInNewContext(source,{...(chrome?{chrome:browser}:{browser}),URL,AbortSignal,TextEncoder,crypto:webcrypto,Uint8Array,
     AUTH_CONFIG:{fleetKey:key},
-    fetch:async(url,options)=>{calls.push({url,options});if(!url.includes('/auth-companion/')){const page=site[new URL(url).pathname]||{type:'text/html',body:'<script>app()</script>'};const status=page.status||200;return {ok:status>=200&&status<300,type:page.responseType||'basic',status,headers:{get:name=>name==='content-type'?page.type:page.disposition},text:async()=>page.body};}return {ok:true,json:async()=>url.endsWith('/pending')?pending:{delivered:true}};}});
+    fetch:async(url,options)=>{calls.push({url,options});if(!url.includes('/auth-companion/')){const page=site[new URL(url).pathname]||{type:'text/html',body:'<script>app()</script>'};const status=page.status||200;return {ok:status>=200&&status<300,type:page.responseType||'basic',status,headers:{get:name=>name==='content-type'?page.type:page.disposition},text:async()=>page.body};}return {ok:true,json:async()=>(url.endsWith('/pending')||url.endsWith('/password-pending'))?pending:{delivered:true}};}});
   const send=(message,sender)=>chrome?new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);}):listener(message,sender);
   return {send,calls,request,tabCalls,injected,updated:(...a)=>updated(...a),state};
 }
@@ -137,4 +137,26 @@ test('failed injection retries the site document once and surfaces failure inste
   assert.match(popup.error,/Could not open passkey approval.*chrome-error/);
   assert.equal((await app.send(open(app),viewer)).opened,true);
   assert.equal(app.state.approvalError,undefined);
+});
+
+test('password bridge verifies its request, requires a script-free document, binds its payload proof and returns',async()=> {
+  const request={id:'abcdef0123456789',origin:'https://auth.nebius.com',kind:'password',fields:[{role:'username'},{role:'password'}],expiresAt:Date.now()+120000};
+  const app=await setup({items:[signed(request)],site:{'/robots.txt':{type:'text/plain',body:'User-agent: *'}}});
+  // Give this fake relay the separate password-pending route.
+  // setup's fetch implementation handles both kinds of signed pending feed.
+  const msg={type:'password-viewer-open',code:request.id.slice(0,8).toUpperCase(),origin:request.origin};
+  assert.equal((await app.send(msg,viewer)).opened,true);
+  assert.equal(app.tabCalls.at(-1)[2].url,request.origin+'/robots.txt');
+  await app.updated(7,{status:'complete'},{url:request.origin+'/robots.txt'});
+  assert.equal(app.injected.at(-1).files[0],'password.js');
+  const values={username:'dummy',password:'dummy-password'};
+  assert.ok((await app.send({type:'complete',id:request.id,values},{...approval(app),tab:{id:8}})).error);
+  assert.equal((await app.send({type:'complete',id:request.id,values},approval(app))).delivered,true);
+  const body=JSON.parse(posts(app,'/password-complete')[0].options.body);
+  assert.equal(body.proof,mac(key,'password-complete',request.id,JSON.stringify(values)));
+  assert.deepEqual(body.values,values);assert.equal(app.tabCalls.at(-1)[2].url,viewerURL);
+  assert.equal(app.state.binding,undefined);
+  const unsafe=await setup({items:[signed(request)]});
+  assert.match((await unsafe.send(msg,viewer)).error,/no safe password-fill page/);
+  assert.equal(unsafe.tabCalls.length,0);
 });
