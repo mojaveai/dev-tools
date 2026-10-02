@@ -8,7 +8,7 @@ test('viewer bridge requires a real user click and keeps the fleet key out of pa
   const button={dataset:{devtoolsAuthCode:'12345678',authOrigin:'https://auth.nebius.com'},addEventListener:(_,fn)=>handler=fn};
   const window={};window.top=window;
   vm.runInNewContext(source,{window,location:{protocol:'https:',port:'8443',hostname:'coder-pod.asg.ts.net',pathname:'/'},
-    document:{documentElement:{},querySelectorAll:()=>[button]},MutationObserver:class{observe(){}},
+    document:{documentElement:{},querySelectorAll:()=>[button],getElementById:()=>null,addEventListener:()=>{}},MutationObserver:class{observe(){}},
     browser:{runtime:{sendMessage:async m=>{messages.push(m);return {opened:true};}}}});
   await handler({isTrusted:false});assert.equal(messages.length,0);
   await handler({isTrusted:true});assert.equal(messages.length,1);

@@ -1,0 +1,17 @@
+---
+- name: Roll out only the Proton Pass bootstrap editor policy
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Activate a release preserving every other installed runtime file
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/../fleet/update_pass_policy.py {{ lookup('ansible.builtin.file', playbook_dir + '/../lib/25-passcli.sh', rstrip=false) | b64encode }}"
+        executable: python3
+      register: policy_result
+      changed_when: (policy_result.stdout | trim | from_json).changed
+      when: not ansible_check_mode
+
+    - name: Publish policy release
+      ansible.builtin.debug:
+        msg: "{{ policy_result.stdout | trim | from_json }}"
+      when: not ansible_check_mode

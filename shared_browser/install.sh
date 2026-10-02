@@ -167,20 +167,10 @@ systemctl --user enable --now dev-tools-shared-browser.service
 if [ "$browser_restore" = true ]; then
   "$node_path" "$runtime_dir/migrate-engine.mjs" restore
 fi
-# The optional portal helper was originally installed in a separate runtime.
-# Keep its Chrome discovery compatible when the shared engine is upgraded.
-if systemctl --user is-active --quiet dev-tools-portal-passkey.service; then
-  portal_runtime=$(systemctl --user show dev-tools-portal-passkey.service --property=WorkingDirectory --value)
-  if [ ! -d "$portal_runtime" ]; then
-    echo 'Active portal passkey helper has no valid runtime directory.' >&2
-    exit 1
-  fi
-  if [ "$portal_runtime" != "$runtime_dir" ]; then
-    install -m 0644 browser-endpoint.mjs settings.mjs portal-passkey-bridge.mjs portal-passkey-hook.js portal-passkey-origin.mjs "$portal_runtime/"
-    mkdir -p "$portal_runtime/dist"
-    install -m 0644 dist/portal-passkey.html dist/portal-passkey-client.js "$portal_runtime/dist/"
-  fi
-  systemctl --user restart dev-tools-portal-passkey.service
+# The generic host extension now owns WebAuthn for every site. Retire the
+# older page hook so it cannot intercept Agent Trace ahead of that extension.
+if systemctl --user cat dev-tools-portal-passkey.service >/dev/null 2>&1; then
+  systemctl --user disable --now dev-tools-portal-passkey.service
 fi
 else
     SHARED_BROWSER_CDP_PORT_FILE=${SHARED_BROWSER_CDP_PORT_FILE:-} python3 "$runtime_dir/services.py" install "$browser_state" "$runtime_dir" "$node_path" "$chrome_path" "$browser_origin" "$browser_owner" "${xvfb_path:-}" "$browser_engine"

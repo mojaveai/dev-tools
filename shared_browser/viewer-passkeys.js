@@ -41,27 +41,6 @@ export class ViewerPasskeys {
         row.append(button);
         this.panel.append(row);continue;
       }
-      const url = new URL(request.url);
-      if (!['https://procbox.agent-trace.ts.net:23581','https://procbox.agent-trace.ts.net:3581'].includes(url.origin) || url.pathname !== '/_shared-browser-passkey/') continue;
-      const row = document.createElement('div');
-      row.style.cssText = 'padding:12px;border:1px solid #a4c9e9;border-radius:10px;background:#eef7ff;display:flex;align-items:center;gap:12px;flex-wrap:wrap';
-      const text = document.createElement('span');
-      text.textContent = 'Passkey requested · Agent Trace '+(url.port==='3581'?'canonical dev':'QA')+' · '+request.code;
-      const link = document.createElement('a');
-      link.textContent = 'Open separate approval window';
-      url.searchParams.set('auto','1');
-      link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
-      link.style.cssText = 'padding:9px 12px;border-radius:7px;background:#155eaa;color:white;text-decoration:none';
-      const frame = document.createElement('iframe');
-      const embedded = new URL(request.url);
-      embedded.searchParams.set('embed','1');
-      frame.src = embedded.href;
-      frame.title = 'Approve Agent Trace sign-in with your passkey';
-      frame.allow = 'publickey-credentials-get';
-      frame.setAttribute('sandbox','allow-scripts allow-same-origin');
-      frame.style.cssText = 'width:100%;height:310px;border:0;border-radius:8px;background:#f3f5f7';
-      row.append(text, frame, link);
-      this.panel.append(row);
     }
   }
 }

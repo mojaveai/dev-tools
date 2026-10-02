@@ -38,8 +38,8 @@ another passkey on their Mac (Chrome or Safari with the Dev Tools Auth extension
 and return to the viewer automatically. Wait for them, then confirm from the page
 that the site actually signed in; delivery alone is not success. Requests expire
 after two minutes. If the button says to enable Dev Tools Auth, the user's
-extension is not loaded in that browser. On procbox, Agent Trace QA sign-ins
-still use their separate approval link.
+extension is not loaded in that browser. Agent Trace uses the same extension
+approval flow as every other HTTPS site.
 Never request passwords, passkey private material, or biometric data in chat.
 
 If tools are absent, reconnect MCP or start a new agent session. Diagnose with

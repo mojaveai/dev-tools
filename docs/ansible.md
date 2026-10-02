@@ -51,6 +51,16 @@ Proton uses the full user-owned session on macOS. If that session is locked or
 inaccessible to a background process, Mac health verification fails and requires
 an interactive unlock; it never falls back to a codex-only agent PAT. Linux hosts
 continue using their provisioned, codex-scoped PATs.
+New bootstrap tokens receive editor access to the configured vaults. Existing
+tokens need their current grants upgraded through the controller's full Proton
+session; rerunning bootstrap does not change token permissions.
+
+For a focused bootstrap policy rollout, run
+`ansible-playbook -i ansible/inventory.yml ansible/proton-policy.yml`.
+This overlays only `lib/25-passcli.sh` onto a copy of each host's active release
+and atomically activates it. It preserves other installed runtime files and the
+previous checked health record, and does not run installers or restart services.
+
 No credentials are stored in inventory
 or the release. Raw provisioner and authentication output is suppressed; the
 playbook publishes only integration status labels. Final health is recorded in

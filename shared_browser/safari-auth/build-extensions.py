@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import shutil
 
-SCRIPTS = ['background.js', 'approval.js', 'viewer.js', 'popup.js', 'popup.html']
+SCRIPTS = ['background.js', 'approval.js', 'password.js', 'viewer.js', 'popup.js', 'popup.html']
 
 
 def build(source, key_hex, output, browser):
@@ -28,8 +28,8 @@ def build(source, key_hex, output, browser):
     else:
         background = {'scripts': ['config.js', 'background.js'], 'persistent': False}
     manifest = dict(
-        manifest_version=3, name='Dev Tools Auth', version='1.0.0',
-        description='Approve passkey sign-ins for your dev-tools shared browsers.',
+        manifest_version=3, name='Dev Tools Auth', version='1.1.1',
+        description='Use saved passwords and approve passkeys in your shared browsers.',
         permissions=['storage', 'scripting'],
         # Approval runs on the requesting site's real origin; viewers are Tailscale hosts.
         host_permissions=['https://*/*'],

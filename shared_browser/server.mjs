@@ -3,7 +3,8 @@ import { installCanvasSnapshots } from './canvas-snapshots.js';
 import { installLayoutMetrics } from './layout-metrics.js';
 import http from "node:http";
 import {authCompanionProxy} from './auth-companion-proxy.mjs';
-import {startAuthHost} from './auth-host.mjs';
+import {startAuthHost,readFleetKey} from './auth-host.mjs';
+import {PasswordFill} from './password-fill.mjs';
 import {browserDataDir} from './browser-host.mjs';
 import {TabIdle} from "./tab-idle.mjs";
 import { AssetDelivery, rewriteStylesheet } from "./asset-delivery.mjs";
@@ -527,6 +528,8 @@ async function body(req, max = 200000) {
   return JSON.parse(Buffer.concat(parts).toString() || "{}");
 }
 const authorized = (req) => req.headers["tailscale-user-login"] === owner;
+const passwordFill = new PasswordFill({key:await readFleetKey(),viewer:publicOrigin,
+  getTab:id=>session.tabs.get(id),active:()=>session.active,serial});
 const httpServer = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://local");
@@ -547,6 +550,20 @@ const httpServer = http.createServer(async (req, res) => {
         },
         403,
       );
+    if (url.pathname === '/auth-companion/password-pending' && req.method === 'GET')
+      return json(res,passwordFill.pending());
+    if ((url.pathname === '/password-request' || /^\/auth-companion\/password-(complete|cancel)$/.test(url.pathname)) && req.method === 'POST') {
+      if (url.pathname === '/password-request' && req.headers.origin !== publicOrigin)
+        return json(res,{error:'Invalid password request origin'},403);
+      let size=0;const chunks=[];
+      for await (const chunk of req) {size+=chunk.length;if(size>20000)return json(res,{error:'Request too large'},413);chunks.push(chunk);}
+      try {
+        const body=JSON.parse(Buffer.concat(chunks).toString() || '{}');
+        return json(res,url.pathname === '/password-request'
+          ? await serial(()=>passwordFill.start(body))
+          : await passwordFill.finish(url.pathname.endsWith('complete')?'complete':'cancel',body));
+      } catch(error) {return json(res,{error:error.message},409);}
+    }
     if (url.pathname.startsWith('/auth-companion/')) return authCompanionProxy(req,res);
     if (url.pathname === '/upload' && req.method === 'POST') {
       if (req.headers.origin !== publicOrigin) return json(res, {error:'Invalid upload origin'}, 403);
@@ -610,7 +627,7 @@ const httpServer = http.createServer(async (req, res) => {
       return stream.pipe(res);
     }
     if (url.pathname === '/passkey-requests') {
-      const feeds=['http://127.0.0.1:8797/agent/state','http://127.0.0.1:8798/agent/state','http://localhost:8811/agent/state'];
+      const feeds=['http://localhost:8811/agent/state'];
       const lists=await Promise.all(feeds.map(async endpoint=>{try{
         const response=await fetch(endpoint,{signal:AbortSignal.timeout(1000)});
         if(!response.ok)throw Error('Passkey broker unavailable');
@@ -659,7 +676,7 @@ const httpServer = http.createServer(async (req, res) => {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob: https://procbox.agent-trace.ts.net:23581 https://procbox.agent-trace.ts.net:3581; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     });
     res.end(zipped ? gzipSync(payload) : payload);
   } catch (err) {
