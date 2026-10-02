@@ -54,3 +54,20 @@ the username had been edited first. Version 1.1.1 commits each field and its
 events in sequence, revalidates destinations between updates, and checks the
 retained values before reporting success. The helper uses a non-submit button
 to avoid Chrome offering to save a duplicate copy.
+
+Fleet rollout on 2026-10-02: the password bridge and editor PAT policy were
+committed and pushed on `codex/general-passkey-approval` (PR #18). Runtime release
+`92a7fe9774df8efe104e575000418634629ee18ee1e97aee09532d4666e42e20`
+is active on every inventory host. All four Linux browser runtimes match the
+release, and the Mac Chrome/Safari companion extensions were rebuilt at 1.1.1.
+Procbox, demobox and bolde-b200s serve the new password-fill controls publicly.
+
+The rebuilt Coder pod needed Supervisor restored and its stale Chrome profile
+locks cleared after verifying that the preceding pod no longer existed. Chrome,
+receiver and registration now run normally. Its Tailscale daemon lives in a
+separate pod container, so local installation used
+`SHARED_BROWSER_ORIGIN=https://ws-bolde-workspace-large.asg.ts.net:8443` with
+`shared_browser/install.sh`. Public viewer publication remains pending an admin
+Kubernetes context: the workload account cannot execute commands in the sidecar.
+Inspect the sidecar's existing Serve configuration before allocating its dedicated
+8443 listener to `http://127.0.0.1:8791`; preserve other routes.
